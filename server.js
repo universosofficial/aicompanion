@@ -23,6 +23,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 // Security Headers (configured to allow Cloudinary CDN assets)
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 
