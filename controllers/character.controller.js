@@ -62,6 +62,50 @@ export class CharacterController {
       return next(err);
     }
   }
+
+  /**
+   * POST /api/characters/generate-magic
+   * Synthesize a complete character persona from a 1-sentence prompt
+   */
+  async generateMagicPersona(req, res, next) {
+    try {
+      const { prompt } = req.body;
+      if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Please provide a short description of who you want to create.',
+          },
+        });
+      }
+
+      const data = await characterService.generateMagicPersona(prompt.trim());
+      return res.status(200).json({
+        success: true,
+        data,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  /**
+   * POST /api/characters/preview-vibe
+   * Generate a 1-turn sample response for a draft persona before saving
+   */
+  async previewPersonaVibe(req, res, next) {
+    try {
+      const { personaDraft, sampleUserPrompt } = req.body;
+      const data = await characterService.previewPersonaVibe(personaDraft || {}, sampleUserPrompt || '');
+      return res.status(200).json({
+        success: true,
+        data,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
 }
 
 export const characterController = new CharacterController();

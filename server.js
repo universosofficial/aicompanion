@@ -14,6 +14,9 @@ import mindRoutes from './routes/mind.routes.js';
 import myMindRoutes from './routes/my-mind.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
 import voiceRoutes from './routes/voice.routes.js';
+import sportsRoutes from './routes/sports.routes.js';
+import notificationsRoutes from './routes/notifications.routes.js';
+import { startProactiveCheckinJob, stopProactiveCheckinJob } from './jobs/proactive-checkin.job.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import errorHandler from './middleware/errorHandler.middleware.js';
@@ -110,6 +113,8 @@ app.use('/api/minds', aiLimiter, mindRoutes);
 app.use('/api/my-mind', myMindRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/voice', aiLimiter, voiceRoutes);
+app.use('/api/sports', sportsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 // Undefined Route Fallback (404)
 app.use((req, res) => {
@@ -146,6 +151,9 @@ const server = app.listen(env.PORT, async () => {
     );
   }
 
+  // Start Proactive Character Engagement & Push Notification Worker
+  startProactiveCheckinJob();
+
   // High concurrency reverse proxy keep-alive timeouts (Cloudflare, Nginx, ALB)
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
@@ -154,6 +162,7 @@ const server = app.listen(env.PORT, async () => {
 // Graceful Shutdown Handling
 const shutdown = async (signal) => {
   console.log(`\n[SHUTDOWN] Received ${signal}. Gracefully closing server and database pool...`);
+  stopProactiveCheckinJob();
   server.close(async () => {
     await closePool();
     console.log('[SHUTDOWN] Server exited cleanly.');

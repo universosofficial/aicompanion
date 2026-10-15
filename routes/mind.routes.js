@@ -49,6 +49,10 @@ router.get('/explore', optionalAuthenticate, (req, res, next) =>
   mindsDiscoveryController.exploreMinds(req, res, next)
 );
 
+router.post('/council', optionalAuthenticate, (req, res, next) =>
+  mindsDiscoveryController.consultCouncil(req, res, next)
+);
+
 router.get('/@:handle', optionalAuthenticate, (req, res, next) =>
   mindsDiscoveryController.getMindByHandle(req, res, next)
 );
@@ -70,6 +74,22 @@ router.post('/:handle/consult', optionalAuthenticate, (req, res, next) =>
 
 router.post('/:id/consult', optionalAuthenticate, (req, res, next) =>
   mindsDiscoveryController.consultMind(req, res, next)
+);
+
+router.post('/@:handle/escalate', authenticateToken, (req, res, next) =>
+  mindsDiscoveryController.escalateToHuman(req, res, next)
+);
+
+router.post('/:handle/escalate', authenticateToken, (req, res, next) =>
+  mindsDiscoveryController.escalateToHuman(req, res, next)
+);
+
+router.post('/@:handle/mode', authenticateToken, (req, res, next) =>
+  mindsDiscoveryController.switchChatMode(req, res, next)
+);
+
+router.post('/:handle/mode', authenticateToken, (req, res, next) =>
+  mindsDiscoveryController.switchChatMode(req, res, next)
 );
 
 // Backward-compatible alias

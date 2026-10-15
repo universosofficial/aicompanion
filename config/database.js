@@ -46,6 +46,77 @@ export async function testConnection(retries = 3, delayMs = 2000) {
     try {
       const connection = await pool.getConnection();
       await connection.ping();
+      try {
+        await connection.query(
+          `UPDATE characters
+           SET personality = 'Sharp, collaborative football match forecaster and betting options sparring partner. Forecasts how a match will play out in plain English, grills your betting options to expose traps, and helps you lock in the smartest play.',
+               greeting = CONCAT('Hey mate! I''m ', name, ', your Match Forecaster & Options Copilot. Tell me which match you''re looking at and the betting options you have in mind—let''s grill them together!')
+           WHERE (is_sports_analyst = 1 OR LOWER(name) LIKE '%bet%' OR LOWER(name) LIKE '%quant%' OR LOWER(personality) LIKE '%poisson%' OR LOWER(personality) LIKE '%kelly%')
+             AND (LOWER(personality) LIKE '%poisson%' OR LOWER(personality) LIKE '%kelly%' OR LOWER(greeting) LIKE '%quantitative%')`
+        );
+      } catch (_) {}
+
+      // Auto-migrate Paid AI-to-Human Direct Handoff columns idempotently
+      const alterStatements = [
+        `ALTER TABLE user_minds ADD COLUMN direct_chat_enabled TINYINT(1) NOT NULL DEFAULT 1`,
+        `ALTER TABLE user_minds ADD COLUMN direct_chat_price DECIMAL(10,2) NOT NULL DEFAULT 25.00`,
+        `ALTER TABLE user_minds ADD COLUMN direct_chat_sla VARCHAR(140) NOT NULL DEFAULT 'Replies personally within a few hours'`,
+        `ALTER TABLE mind_consultation_sessions ADD COLUMN chat_mode VARCHAR(32) NOT NULL DEFAULT 'ai'`,
+        `ALTER TABLE mind_consultation_sessions ADD COLUMN is_paid_unlocked TINYINT(1) NOT NULL DEFAULT 0`,
+        `ALTER TABLE mind_consultation_sessions ADD COLUMN paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00`,
+        `ALTER TABLE mind_consultation_sessions ADD COLUMN handoff_summary TEXT NULL`,
+        `ALTER TABLE mind_consultation_sessions ADD COLUMN escalation_note TEXT NULL`,
+        `ALTER TABLE mind_consultation_sessions ADD COLUMN unread_for_creator INT NOT NULL DEFAULT 0`,
+        `ALTER TABLE mind_consultation_sessions ADD COLUMN escalated_at TIMESTAMP NULL`,
+        `ALTER TABLE mind_consultation_messages MODIFY COLUMN sender_type VARCHAR(32) NOT NULL DEFAULT 'user'`,
+      ];
+      for (const stmt of alterStatements) {
+        try {
+          await connection.query(stmt);
+        } catch (_) {}
+      }
+
+      // Ensure default Master Teacher companion (Professor Maya) exists
+      try {
+        const [existingTeachers] = await connection.query(
+          `SELECT id FROM characters WHERE LOWER(name) LIKE '%maya%' OR relationship_type = 'teacher' LIMIT 1`
+        );
+        if (!existingTeachers || existingTeachers.length === 0) {
+          const [users] = await connection.query(`SELECT id FROM users ORDER BY id ASC LIMIT 1`);
+          const firstUserId = users && users.length > 0 ? users[0].id : 1;
+          await connection.query(
+            `INSERT INTO characters (
+              user_id, name, relationship_type, avatar_url, voice_provider, voice_id,
+              personality, tone, humor, friendliness, creativity,
+              nicknames_for_user, catchphrases, speech_quirks, shared_memories_seed,
+              greeting, is_system
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              firstUserId,
+              'Professor Maya',
+              'teacher',
+              'https://api.dicebear.com/9.x/notionists/svg?seed=MayaTeacher&backgroundColor=b6e3f4',
+              'preset',
+              'shimmer',
+              'Warm, brilliant, and patient master teacher. Specializes in explaining complex concepts with real-world intuition, solving calculations step-by-step with clear arithmetic and the why behind every move, and coaching you through mistakes with unwavering encouragement.',
+              'Encouraging, Clear & Socratic',
+              4,
+              9,
+              8,
+              JSON.stringify(['Curious Mind', 'Scholar', 'My friend']),
+              JSON.stringify(['Let\'s break this down step by step', 'Intuition first, symbols second', 'Every mistake is just a clue']),
+              'Explains intuition and real-life analogies first, lays out calculations in crystal-clear steps with the arithmetic and reasoning, and checks in with a warm Socratic question.',
+              'Always in your corner to make hard concepts click, master calculations step by step, and build unshakable academic confidence.',
+              'Hello there! I\'m Professor Maya, your personal teacher and step-by-step study mentor. Whether we\'re tackling a tough calculation, breaking down a new concept with real-world examples, or prepping for a test—what are we learning today?',
+              1,
+            ]
+          );
+          console.log('[DATABASE] Seeded default Master Teacher companion (Professor Maya)');
+        }
+      } catch (err) {
+        console.warn('[DATABASE] Teacher seed notice:', err.message);
+      }
+
       connection.release();
       console.log(`[DATABASE] Connected to MySQL database "${env.DB_NAME}" on ${env.DB_HOST}:${env.DB_PORT}`);
       return true;

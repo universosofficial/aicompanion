@@ -32,13 +32,18 @@ export class CharacterRepository {
     voiceId = 'alloy',
     voiceSampleUrl = null,
     voiceSettings = null,
+    isSportsAnalyst = false,
+    analysisStyle = 'quant_expected_value',
+    primaryLeagues = [],
+    riskTier = 'balanced_quarter_kelly',
   }) {
     const sql = `
       INSERT INTO characters (
         user_id, name, relationship_type, avatar_url, voice_provider, voice_id, voice_sample_url, voice_settings,
         gender, personality, tone, humor, friendliness, creativity, style, nicknames_for_user, catchphrases,
-        speech_quirks, shared_memories_seed, backstory, interests, greeting, is_system
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        speech_quirks, shared_memories_seed, backstory, interests, greeting, is_system,
+        is_sports_analyst, analysis_style, primary_leagues, risk_tier
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const serializedNicknames = Array.isArray(nicknamesForUser) || typeof nicknamesForUser === 'object'
@@ -51,6 +56,10 @@ export class CharacterRepository {
 
     const serializedInterests = Array.isArray(interests) || typeof interests === 'object'
       ? JSON.stringify(interests)
+      : JSON.stringify([]);
+
+    const serializedPrimaryLeagues = Array.isArray(primaryLeagues) || typeof primaryLeagues === 'object'
+      ? JSON.stringify(primaryLeagues)
       : JSON.stringify([]);
 
     const serializedVoiceSettings = voiceSettings && typeof voiceSettings === 'object'
@@ -81,27 +90,142 @@ export class CharacterRepository {
       serializedInterests,
       greeting,
       isSystem ? 1 : 0,
+      isSportsAnalyst ? 1 : 0,
+      analysisStyle || 'quant_expected_value',
+      serializedPrimaryLeagues,
+      riskTier || 'balanced_quarter_kelly',
     ]);
 
     return await this.findById(result.insertId);
   }
 
   /**
-   * Find all characters accessible to a user (user-created + system characters).
+   * Find all characters accessible to a user (user-created, system characters, subscribed minds, and active conversations).
    * @param {number|string} userId
    * @returns {Promise<Array>}
    */
   async findAllByUserId(userId) {
     const sql = `
-      SELECT 
-        c.*,
-        0 AS is_subscribed
-      FROM characters c
-      WHERE c.user_id = ? OR c.is_system = TRUE
-      ORDER BY c.is_system DESC, c.created_at DESC
+      SELECT * FROM (
+        SELECT DISTINCT
+          c.id,
+          c.user_id,
+          c.name,
+          c.handle,
+          c.headline,
+          c.relationship_type,
+          c.avatar_url,
+          c.voice_provider,
+          c.voice_id,
+          c.voice_sample_url,
+          c.voice_settings,
+          c.website_url,
+          c.gender,
+          c.personality,
+          c.philosophy_statement,
+          c.tone,
+          c.humor,
+          c.friendliness,
+          c.creativity,
+          c.style,
+          c.nicknames_for_user,
+          c.catchphrases,
+          c.speech_quirks,
+          c.shared_memories_seed,
+          c.backstory,
+          c.interests,
+          c.decision_frameworks,
+          c.mental_models,
+          c.tags,
+          c.greeting,
+          c.is_system,
+          c.is_public,
+          c.total_subscribers,
+          c.is_verified,
+          c.total_interactions,
+          c.created_at,
+          c.updated_at,
+          c.is_sports_analyst,
+          c.analysis_style,
+          c.primary_leagues,
+          c.risk_tier,
+          (sub.id IS NOT NULL) AS is_subscribed,
+          FALSE AS is_mind,
+          GREATEST(
+            COALESCE(c.updated_at, c.created_at),
+            COALESCE((
+              SELECT MAX(m.created_at)
+              FROM messages m
+              JOIN conversations conv ON conv.id = m.conversation_id
+              WHERE conv.character_id = c.id AND conv.user_id = ?
+            ), c.created_at)
+          ) AS sort_time
+        FROM characters c
+        LEFT JOIN mind_subscriptions sub ON sub.character_id = c.id AND sub.user_id = ?
+        WHERE 
+          c.user_id = ? 
+          OR c.is_system = TRUE
+          OR sub.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 
+            FROM conversations conv 
+            WHERE conv.character_id = c.id AND conv.user_id = ?
+          )
+
+        UNION ALL
+
+        SELECT DISTINCT
+          m.id AS id,
+          m.user_id AS user_id,
+          COALESCE(m.display_name, m.handle) AS name,
+          m.handle AS handle,
+          m.headline AS headline,
+          'companion' AS relationship_type,
+          m.avatar_url AS avatar_url,
+          m.voice_provider AS voice_provider,
+          m.voice_id AS voice_id,
+          m.voice_sample_url AS voice_sample_url,
+          m.voice_settings AS voice_settings,
+          m.website_url AS website_url,
+          'Mind' AS gender,
+          COALESCE(m.bio, m.philosophy_statement) AS personality,
+          m.philosophy_statement AS philosophy_statement,
+          'Philosophical & Socratic' AS tone,
+          5 AS humor,
+          5 AS friendliness,
+          5 AS creativity,
+          'Direct & Conversational' AS style,
+          '[]' AS nicknames_for_user,
+          '[]' AS catchphrases,
+          NULL AS speech_quirks,
+          NULL AS shared_memories_seed,
+          m.bio AS backstory,
+          m.tags AS interests,
+          m.decision_frameworks AS decision_frameworks,
+          '[]' AS mental_models,
+          m.tags AS tags,
+          CONCAT('Hello! I am the AI Mind of ', COALESCE(m.display_name, m.handle), '. What would you like to explore today?') AS greeting,
+          FALSE AS is_system,
+          TRUE AS is_public,
+          0 AS total_subscribers,
+          TRUE AS is_verified,
+          m.total_consultations AS total_interactions,
+          m.created_at AS created_at,
+          m.updated_at AS updated_at,
+          FALSE AS is_sports_analyst,
+          'quant_expected_value' AS analysis_style,
+          '[]' AS primary_leagues,
+          'balanced_quarter_kelly' AS risk_tier,
+          TRUE AS is_subscribed,
+          TRUE AS is_mind,
+          COALESCE(s.last_message_at, m.updated_at, m.created_at) AS sort_time
+        FROM user_minds m
+        JOIN mind_consultation_sessions s ON s.mind_id = m.id AND s.visitor_user_id = ?
+      ) combined
+      ORDER BY sort_time DESC
     `;
 
-    const [rows] = await baseRepository.query(sql, [userId]);
+    const [rows] = await baseRepository.query(sql, [userId, userId, userId, userId, userId]);
     return rows.map((r) => this.formatCharacter(r));
   }
 
@@ -141,9 +265,13 @@ export class CharacterRepository {
       'voice_provider', 'voice_id', 'voice_sample_url', 'voice_settings',
       'is_public', 'is_verified', 'handle', 'headline', 'website_url', 'philosophy_statement',
       'decision_frameworks', 'mental_models', 'tags', 'total_subscribers',
+      'is_sports_analyst', 'analysis_style', 'primary_leagues', 'risk_tier',
     ];
 
-    const jsonFields = ['interests', 'nicknames_for_user', 'catchphrases', 'decision_frameworks', 'mental_models', 'tags', 'voice_settings'];
+    const jsonFields = [
+      'interests', 'nicknames_for_user', 'catchphrases', 'decision_frameworks',
+      'mental_models', 'tags', 'voice_settings', 'primary_leagues',
+    ];
 
     for (const field of allowedFields) {
       if (updates[field] !== undefined) {
@@ -154,7 +282,7 @@ export class CharacterRepository {
           } else {
             values.push(updates[field]);
           }
-        } else if (field === 'is_public') {
+        } else if (field === 'is_public' || field === 'is_sports_analyst') {
           values.push(updates[field] ? 1 : 0);
         } else {
           values.push(updates[field]);
@@ -224,6 +352,7 @@ export class CharacterRepository {
       is_public: Boolean(row.is_public),
       is_verified: Boolean(row.is_verified),
       is_subscribed: Boolean(row.is_subscribed),
+      is_mind: Boolean(row.is_mind),
       handle: row.handle || null,
       headline: row.headline || '',
       website_url: row.website_url || null,
@@ -244,7 +373,25 @@ export class CharacterRepository {
       voice_settings: typeof row.voice_settings === 'string'
         ? (() => { try { return JSON.parse(row.voice_settings); } catch { return {}; } })()
         : (row.voice_settings || {}),
+      is_sports_analyst: Boolean(row.is_sports_analyst),
+      analysis_style: row.analysis_style || 'quant_expected_value',
+      primary_leagues: parseJsonArray(row.primary_leagues),
+      risk_tier: row.risk_tier || 'balanced_quarter_kelly',
+      allow_proactive_checkins: row.allow_proactive_checkins !== undefined ? Boolean(row.allow_proactive_checkins) : true,
     };
+  }
+
+  /**
+   * Update proactive check-in permission for a character.
+   */
+  async updateProactiveCheckins(characterId, userId, allow) {
+    const sql = `
+      UPDATE characters
+      SET allow_proactive_checkins = ?
+      WHERE id = ? AND (user_id = ? OR is_system = TRUE)
+    `;
+    await baseRepository.execute(sql, [allow ? 1 : 0, characterId, userId]);
+    return await this.findById(characterId);
   }
 }
 

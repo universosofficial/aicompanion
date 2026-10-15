@@ -33,7 +33,7 @@ export class OpenAiService {
     messages,
     model = env.OPENAI_MODEL || 'gpt-4o-mini',
     temperature = 0.65,
-    max_tokens = 300,
+    max_tokens = 650,
   }) {
     if (!env.OPENAI_API_KEY || env.OPENAI_API_KEY === 'dummy-key-offline') {
       return this.generateOfflineSimulation(messages);
@@ -54,7 +54,7 @@ export class OpenAiService {
       return {
         content,
         promptTokens: usage.prompt_tokens || 0,
-        completionTokens: usage.completion_tokens || 0,
+        completionTokens: usage.completionTokens || usage.completion_tokens || 0,
         totalTokens: usage.total_tokens || 0,
       };
     } catch (error) {
@@ -69,12 +69,12 @@ export class OpenAiService {
   /**
    * Create real-time streaming chat completion.
    * Yields text chunks as they arrive.
-   * Enforces conversational pacing via default max_tokens (300) and temperature (0.65).
+   * Enforces conversational pacing via prompt rules while providing a 650-token safety ceiling so sentences never cut off mid-stream.
    * @param {Object} params
    * @param {Array} params.messages
    * @param {string} [params.model]
    * @param {number} [params.temperature=0.65]
-   * @param {number} [params.max_tokens=300]
+   * @param {number} [params.max_tokens=650]
    * @param {AbortSignal} [params.signal]
    * @returns {Promise<AsyncIterable<string>>}
    */
@@ -82,7 +82,7 @@ export class OpenAiService {
     messages,
     model = env.OPENAI_MODEL || 'gpt-4o-mini',
     temperature = 0.65,
-    max_tokens = 300,
+    max_tokens = 650,
     signal,
   }) {
     // If no valid OpenAI key, return an offline async generator yielding simulated words

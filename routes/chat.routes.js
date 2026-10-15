@@ -17,6 +17,8 @@ router.post('/conversations', (req, res, next) => chatController.startConversati
 router.get('/conversations/:id/messages', (req, res, next) => chatController.getMessages(req, res, next));
 router.post('/message', (req, res, next) => chatController.sendMessage(req, res, next));
 router.post('/stream', (req, res, next) => chatController.streamMessage(req, res, next));
+router.patch('/messages/:id', (req, res, next) => chatController.editMessage(req, res, next));
+router.delete('/messages/:id', (req, res, next) => chatController.deleteMessage(req, res, next));
 router.post('/voice-turn', upload.single('audio'), (req, res, next) => voiceController.voiceTurn(req, res, next));
 
 export default router;

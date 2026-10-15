@@ -16,7 +16,7 @@ export class ChatService {
       throw err;
     }
 
-    if (character.user_id !== userId && !character.is_system) {
+    if (character.user_id !== userId && !character.is_system && !character.is_public) {
       const err = new Error('Access denied to this character.');
       err.statusCode = 403;
       err.code = 'FORBIDDEN';
@@ -89,6 +89,76 @@ export class ChatService {
       conversationId,
       content: content.trim(),
     });
+  }
+
+  /**
+   * Edit a message content in a conversation
+   */
+  async editMessage({ userId, messageId, content }) {
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      const err = new Error('Updated message content is required.');
+      err.statusCode = 400;
+      err.code = 'VALIDATION_ERROR';
+      throw err;
+    }
+
+    const message = await messageRepository.findById(messageId);
+    if (!message) {
+      const err = new Error('Message not found.');
+      err.statusCode = 404;
+      err.code = 'MESSAGE_NOT_FOUND';
+      throw err;
+    }
+
+    // Verify user owns the conversation
+    const conversation = await conversationRepository.findById(message.conversation_id, userId);
+    if (!conversation) {
+      const err = new Error('Unauthorized to edit this message.');
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN';
+      throw err;
+    }
+
+    // Only allow editing user messages
+    if (message.sender_type !== 'user') {
+      const err = new Error('Only user messages can be edited.');
+      err.statusCode = 400;
+      err.code = 'CANNOT_EDIT_ASSISTANT_MESSAGE';
+      throw err;
+    }
+
+    const tokenCount = Math.ceil(content.trim().length / 4);
+    const updated = await messageRepository.updateContent(messageId, content.trim(), tokenCount);
+    return updated;
+  }
+
+  /**
+   * Delete a message from a conversation
+   */
+  async deleteMessage({ userId, messageId }) {
+    const message = await messageRepository.findById(messageId);
+    if (!message) {
+      const err = new Error('Message not found.');
+      err.statusCode = 404;
+      err.code = 'MESSAGE_NOT_FOUND';
+      throw err;
+    }
+
+    // Verify user owns the conversation
+    const conversation = await conversationRepository.findById(message.conversation_id, userId);
+    if (!conversation) {
+      const err = new Error('Unauthorized to delete this message.');
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN';
+      throw err;
+    }
+
+    await messageRepository.deleteById(messageId);
+    return {
+      id: messageId,
+      conversationId: message.conversation_id,
+      deleted: true,
+    };
   }
 }
 

@@ -147,6 +147,28 @@ export class MemoryService {
   }
 
   /**
+   * Explicitly create/teach a memory item from the user.
+   */
+  async createMemory({ userId, characterId, content, category = 'fact', memoryType = 'user_fact', importanceScore = 5 }) {
+    return await memoryRepository.create({
+      userId,
+      characterId,
+      memoryType,
+      category,
+      content,
+      importanceScore,
+      occurredAt: new Date(),
+    });
+  }
+
+  /**
+   * Update/edit an existing memory item.
+   */
+  async updateMemory(id, userId, updates) {
+    return await memoryRepository.update(id, userId, updates);
+  }
+
+  /**
    * Delete a memory item.
    */
   async deleteMemory(id, userId) {

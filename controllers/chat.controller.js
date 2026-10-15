@@ -87,7 +87,7 @@ export class ChatController {
    * Real-Time Server-Sent Events (SSE) streaming endpoint
    */
   async streamMessage(req, res, next) {
-    const { characterId, conversationId, content } = req.body;
+    const { characterId, conversationId, content, conversationMode } = req.body;
 
     if (!characterId || !content || typeof content !== 'string' || !content.trim()) {
       return res.status(400).json({
@@ -138,6 +138,7 @@ export class ChatController {
         characterId,
         conversationId,
         content: content.trim(),
+        conversationMode: conversationMode || 'default',
         signal: abortController.signal,
         onChunk: (chunk) => {
           if (!res.writableEnded) {
@@ -170,6 +171,50 @@ export class ChatController {
       }
     } finally {
       clearInterval(heartbeatTimer);
+    }
+  }
+
+  /**
+   * PATCH /api/chat/messages/:id
+   * Edit message content
+   */
+  async editMessage(req, res, next) {
+    try {
+      const messageId = req.params.id;
+      const { content } = req.body;
+      const updated = await chatService.editMessage({
+        userId: req.user.id,
+        messageId,
+        content,
+      });
+
+      return res.json({
+        success: true,
+        data: updated,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  /**
+   * DELETE /api/chat/messages/:id
+   * Delete message
+   */
+  async deleteMessage(req, res, next) {
+    try {
+      const messageId = req.params.id;
+      const result = await chatService.deleteMessage({
+        userId: req.user.id,
+        messageId,
+      });
+
+      return res.json({
+        success: true,
+        data: result,
+      });
+    } catch (err) {
+      return next(err);
     }
   }
 }

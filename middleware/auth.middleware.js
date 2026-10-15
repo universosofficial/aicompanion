@@ -22,7 +22,7 @@ export function authenticateToken(req, res, next) {
   try {
     const decoded = tokenService.verifyAccessToken(token);
     req.user = {
-      id: decoded.id,
+      id: decoded.id || decoded.userId,
       email: decoded.email,
       role: decoded.role,
     };

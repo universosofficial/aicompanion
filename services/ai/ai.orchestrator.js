@@ -6,6 +6,27 @@ import openAiService from './openai.service.js';
 import memoryService from './memory.service.js';
 import summaryService from './summary.service.js';
 import mindRepository from '../../repositories/mind.repository.js';
+import sportsRepository from '../../repositories/sports.repository.js';
+import sportsApiService from '../sports/sports-api.service.js';
+import quantService from '../sports/quant.service.js';
+import { extractMatchFromText, detectTiltIntent, detectSportsIntent } from '../sports/sports-detector.js';
+
+export const sportsToolDefinition = {
+  type: "function",
+  function: {
+    name: "get_sports_betting_intel",
+    description: "Fetch live managers, verified lineups, injuries, bookmaker odds, and quant signals for upcoming or lookahead matches.",
+    parameters: {
+      type: "object",
+      properties: {
+        home_team: { type: "string", description: "Home team name" },
+        away_team: { type: "string", description: "Away team name" },
+        is_lookahead: { type: "boolean", description: "True if match is over 5 days away" }
+      },
+      required: ["home_team", "away_team"]
+    }
+  }
+};
 
 /**
  * AiOrchestrator
@@ -29,6 +50,7 @@ export class AiOrchestrator {
     characterId,
     conversationId,
     content,
+    conversationMode = 'default',
     onChunk,
     onDone,
     signal,
@@ -108,15 +130,128 @@ export class AiOrchestrator {
 
     const [memories, summary, recentHistory, retrievedChunks = []] = await Promise.all(retrievalPromises);
 
-    // 5. Build enriched composite system prompt
+    // 5. Sports Intelligence Resolution (if character is Sports Analyst)
+    let sportsIntelPayload = null;
+    let quantSignals = null;
+    let bankrollContext = null;
+    let tiltWarning = { triggered: false };
+
+    const isSportsPersona = Boolean(
+      character.is_sports_analyst ||
+      (character.name && /betting|gambl|sports|analyst|tipster|pundit/i.test(character.name)) ||
+      (character.personality && /betting|sports|odds|gambling/i.test(character.personality))
+    );
+
+    if (isSportsPersona) {
+      bankrollContext = await sportsRepository.getBankrollSettings(userId);
+      const streakTelemetry = await sportsRepository.getStreakTelemetry(userId);
+      tiltWarning = detectTiltIntent(content, streakTelemetry);
+
+      if (tiltWarning.triggered) {
+        sportsRepository.updateStreakTelemetry(userId, {
+          circuitBreakerActive: true,
+          consecutiveLosses: tiltWarning.lossCount || 3,
+        }).catch((e) => console.warn('[SPORTS STREAK UPDATE ERROR]', e.message));
+      }
+
+      let sportsIntent = detectSportsIntent(content, streakTelemetry);
+      let suppressSportsCard = false;
+
+      // Check if recent history already established a match so follow-up questions ("what about 2 corners?", "first 5 mins draw?") keep live match context
+      const historyWithoutJustSaved = recentHistory.filter((m) => m.id !== savedUserMessage.id);
+      let recentMatchFromHistory = null;
+      for (let i = historyWithoutJustSaved.length - 1; i >= Math.max(0, historyWithoutJustSaved.length - 4); i--) {
+        const extracted = extractMatchFromText(historyWithoutJustSaved[i].content);
+        if (extracted && extracted.homeTeam && extracted.awayTeam) {
+          recentMatchFromHistory = extracted;
+          break;
+        }
+      }
+
+      if ((!sportsIntent || sportsIntent.type === 'single_team') && recentMatchFromHistory) {
+        sportsIntent = {
+          type: 'match',
+          homeTeam: recentMatchFromHistory.homeTeam,
+          awayTeam: recentMatchFromHistory.awayTeam,
+          isLookahead: recentMatchFromHistory.isLookahead,
+          isOptionFollowUp: true,
+        };
+      }
+
+      if (sportsIntent) {
+        if (sportsIntent.type === 'match') {
+          const sameAsRecentMatch =
+            recentMatchFromHistory &&
+            recentMatchFromHistory.homeTeam === sportsIntent.homeTeam &&
+            recentMatchFromHistory.awayTeam === sportsIntent.awayTeam;
+
+          if (sportsIntent.isOptionFollowUp || sameAsRecentMatch) {
+            suppressSportsCard = true;
+          }
+
+          sportsIntelPayload = await sportsApiService.getFixtureIntel(sportsIntent);
+          sportsIntelPayload = {
+            ...sportsIntelPayload,
+            isOptionFollowUp: Boolean(sportsIntent.isOptionFollowUp || sameAsRecentMatch),
+          };
+          quantSignals = quantService.analyzeMatch({
+            homeTeam: sportsIntent.homeTeam,
+            awayTeam: sportsIntent.awayTeam,
+            matchIntel: sportsIntelPayload,
+            bankrollSettings: bankrollContext,
+            riskTier: character.risk_tier || 'balanced_quarter_kelly',
+          });
+
+          if (quantSignals.bestValue && !tiltWarning.triggered && !suppressSportsCard) {
+            sportsRepository.recordBetRecommendation({
+              userId,
+              characterId: character.id,
+              fixtureName: sportsIntelPayload.fixture,
+              marketType: quantSignals.bestValue.marketType,
+              recommendedSelection: quantSignals.bestValue.selection,
+              modelWinProb: quantSignals.bestValue.prob,
+              entryOdds: quantSignals.bestValue.odds,
+              recommendedStakeUnits: quantSignals.bestValue.sizing.recommendedUnits,
+              recommendedStakeAmount: quantSignals.bestValue.sizing.stakeAmount,
+            }).catch((e) => console.warn('[BET LEDGER ERROR]', e.message));
+          }
+        } else if (sportsIntent.type === 'manager_query') {
+          sportsIntelPayload = {
+            type: 'manager_query',
+            team: sportsIntent.team,
+            manager: sportsIntent.manager,
+          };
+        } else if (sportsIntent.type === 'fixtures_query') {
+          const upcoming = await sportsApiService.getUpcomingLeagueFixtures(sportsIntent.league);
+          sportsIntelPayload = {
+            type: 'fixtures_query',
+            league: sportsIntent.league,
+            fixtures: upcoming,
+          };
+        } else if (sportsIntent.type === 'single_team') {
+          sportsIntelPayload = {
+            type: 'single_team',
+            team: sportsIntent.team,
+            manager: sportsIntent.manager,
+          };
+        }
+      }
+    }
+
+    // 6. Build enriched composite system prompt
     const systemPrompt = promptService.buildSystemPrompt({
       character,
       memories,
       summary,
       retrievedChunks,
+      sportsIntel: sportsIntelPayload,
+      quantSignals,
+      bankrollContext,
+      tiltWarning,
+      conversationMode,
     });
 
-    // 6. Format messages array for OpenAI
+    // 7. Format messages array for OpenAI
     // Exclude the message we just persisted from history to avoid duplicating it
     const historyWithoutCurrent = recentHistory.filter((m) => m.id !== savedUserMessage.id);
     const messagesPayload = [
@@ -128,7 +263,7 @@ export class AiOrchestrator {
       { role: 'user', content },
     ];
 
-    // 7. Dispatch real-time stream
+    // 8. Dispatch real-time stream
     const stream = await openAiService.createChatStream({
       messages: messagesPayload,
       signal,
@@ -151,7 +286,7 @@ export class AiOrchestrator {
       return;
     }
 
-    // 8. Persist assistant reply to database
+    // 9. Persist assistant reply to database
     const assistantTokenCount = Math.ceil(fullAssistantResponse.length / 4);
     const savedAssistantMessage = await messageRepository.create({
       conversationId: conversation.id,
@@ -160,7 +295,7 @@ export class AiOrchestrator {
       tokenCount: assistantTokenCount,
     });
 
-    // 9. Update conversation last activity
+    // 10. Update conversation last activity
     await conversationRepository.updateLastMessageAt(conversation.id);
 
     if (isPublic) {
@@ -169,7 +304,7 @@ export class AiOrchestrator {
       );
     }
 
-    // 10. Notify completion
+    // 11. Notify completion with optional sports intelligence metadata
     onDone({
       conversationId: conversation.id,
       character: {
@@ -179,6 +314,8 @@ export class AiOrchestrator {
         is_public: character.is_public,
         is_verified: character.is_verified,
         handle: character.handle,
+        is_sports_analyst: character.is_sports_analyst,
+        risk_tier: character.risk_tier,
       },
       userMessage: savedUserMessage,
       assistantMessage: savedAssistantMessage,
@@ -188,6 +325,32 @@ export class AiOrchestrator {
         title: c.title,
         topic: c.topic,
       })),
+      sportsIntel: (isSportsPersona && ((sportsIntelPayload && !sportsIntelPayload.isOptionFollowUp) || tiltWarning.triggered))
+        ? {
+            type: sportsIntelPayload?.type || 'match',
+            fixture: sportsIntelPayload?.fixture || null,
+            homeManager: sportsIntelPayload?.homeManager || null,
+            awayManager: sportsIntelPayload?.awayManager || null,
+            manager: sportsIntelPayload?.manager || null,
+            team: sportsIntelPayload?.team || null,
+            fixtures: sportsIntelPayload?.fixtures || null,
+            isLookahead: Boolean(sportsIntelPayload?.isLookahead),
+            isLiveData: Boolean(sportsIntelPayload?.isLiveData),
+            liveSourceLabel: sportsIntelPayload?.liveSourceLabel || null,
+            commenceTime: sportsIntelPayload?.commenceTime || null,
+            bookmakerSource: sportsIntelPayload?.bookmakerSource || null,
+            homeFormSummary: sportsIntelPayload?.homeFormSummary || null,
+            awayFormSummary: sportsIntelPayload?.awayFormSummary || null,
+            probs: quantSignals?.probs || null,
+            odds: sportsIntelPayload?.odds || null,
+            bestValue: quantSignals?.bestValue || null,
+            safeAccumulator: quantSignals?.safeAccumulator || null,
+            regressionWarning: quantSignals?.regressionWarning || null,
+            sizing: quantSignals?.bestValue?.sizing || null,
+            tiltWarning,
+            circuitBreakerActive: Boolean(tiltWarning.triggered),
+          }
+        : null,
     });
 
     // 11. Decoupled Asynchronous Background Tasks (Memory extraction & Rolling summary)

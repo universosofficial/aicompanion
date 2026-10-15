@@ -500,6 +500,10 @@ export class MindController {
         }
 
         if (!activeConversation) {
+          activeConversation = await conversationRepository.findByUserAndCharacter(userId, mind.id);
+        }
+
+        if (!activeConversation) {
           activeConversation = await conversationRepository.create({
             userId,
             characterId: mind.id,

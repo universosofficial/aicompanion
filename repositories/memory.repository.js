@@ -201,6 +201,51 @@ export class MemoryRepository {
   }
 
   /**
+   * Update a memory item's content, category, or importance score with user ownership enforcement.
+   * @param {number|string} id
+   * @param {number|string} userId
+   * @param {Object} updates
+   * @returns {Promise<Object|null>}
+   */
+  async update(id, userId, { content, category, importanceScore }) {
+    const validCategories = ['preference', 'fact', 'relationship', 'goal', 'event'];
+    const fields = [];
+    const params = [];
+
+    if (typeof content === 'string' && content.trim()) {
+      fields.push('content = ?');
+      params.push(content.trim());
+    }
+    if (category && validCategories.includes(category)) {
+      fields.push('category = ?');
+      params.push(category);
+    }
+    if (importanceScore !== undefined) {
+      fields.push('importance_score = ?');
+      params.push(Math.min(5, Math.max(1, parseInt(importanceScore, 10) || 3)));
+    }
+
+    if (fields.length === 0) return null;
+
+    params.push(id, userId);
+    const sql = `
+      UPDATE memories
+      SET ${fields.join(', ')}
+      WHERE id = ? AND user_id = ?
+    `;
+    const result = await baseRepository.execute(sql, params);
+    if (result.affectedRows === 0) return null;
+
+    const [rows] = await baseRepository.query(
+      `SELECT id, user_id, character_id, conversation_id, memory_type, category, content,
+              importance_score, occurred_at, conversation_date, temporal_anchor, last_recalled_at, created_at
+       FROM memories WHERE id = ? AND user_id = ? LIMIT 1`,
+      [id, userId]
+    );
+    return rows.length > 0 ? this.formatMemory(rows[0]) : null;
+  }
+
+  /**
    * Delete a memory item with user ownership enforcement.
    * @param {number|string} id
    * @param {number|string} userId

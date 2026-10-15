@@ -54,6 +54,9 @@ export class UserMindRepository {
       voice_id: row.voice_id || 'echo',
       voice_sample_url: row.voice_sample_url || null,
       voice_settings: voiceSettings,
+      direct_chat_enabled: row.direct_chat_enabled !== undefined ? Boolean(row.direct_chat_enabled) : true,
+      direct_chat_price: row.direct_chat_price !== undefined ? Number(row.direct_chat_price) : 25,
+      direct_chat_sla: row.direct_chat_sla || 'Replies personally within a few hours',
     };
   }
 
@@ -190,6 +193,18 @@ export class UserMindRepository {
         updates.push('is_published = ?');
         params.push(Boolean(data.is_published));
       }
+      if (data.direct_chat_enabled !== undefined) {
+        updates.push('direct_chat_enabled = ?');
+        params.push(Boolean(data.direct_chat_enabled) ? 1 : 0);
+      }
+      if (data.direct_chat_price !== undefined) {
+        updates.push('direct_chat_price = ?');
+        params.push(Number(data.direct_chat_price) || 25);
+      }
+      if (data.direct_chat_sla !== undefined) {
+        updates.push('direct_chat_sla = ?');
+        params.push(String(data.direct_chat_sla).trim() || 'Replies personally within a few hours');
+      }
 
       if (updates.length > 0) {
         params.push(userId);
@@ -277,9 +292,7 @@ export class UserMindRepository {
 
     // Fetch paginated
     const selectSql = `
-      SELECT id, user_id, handle, display_name, headline, avatar_url, voice_provider, voice_id, voice_sample_url, voice_settings,
-             website_url, bio, philosophy_statement, decision_frameworks, tags, is_published,
-             total_consultations, created_at, updated_at
+      SELECT *
       FROM user_minds
       WHERE ${conditions.join(' AND ')}
       ORDER BY total_consultations DESC, created_at DESC

@@ -8,6 +8,8 @@ const router = Router();
 router.use(authenticateToken);
 
 router.get('/', (req, res, next) => characterController.getCharacters(req, res, next));
+router.post('/generate-magic', (req, res, next) => characterController.generateMagicPersona(req, res, next));
+router.post('/preview-vibe', (req, res, next) => characterController.previewPersonaVibe(req, res, next));
 router.get('/:id', (req, res, next) => characterController.getCharacterById(req, res, next));
 router.post('/', (req, res, next) => characterController.createCharacter(req, res, next));
 router.put('/:id', (req, res, next) => characterController.updateCharacter(req, res, next));

@@ -59,9 +59,9 @@ export class MessageRepository {
   async findRecentByConversationId(conversationId, limit = 10) {
     // Subquery retrieves the most recent `limit` messages, then orders them chronologically (ASC)
     const sql = `
-      SELECT id, conversation_id, sender_type, message_type, content, audio_url, duration_seconds, token_count, created_at
+      SELECT id, conversation_id, sender_type, message_type, content, audio_url, duration_seconds, token_count, is_edited, edited_at, created_at
       FROM (
-        SELECT id, conversation_id, sender_type, message_type, content, audio_url, duration_seconds, token_count, created_at
+        SELECT id, conversation_id, sender_type, message_type, content, audio_url, duration_seconds, token_count, is_edited, edited_at, created_at
         FROM messages
         WHERE conversation_id = ?
         ORDER BY created_at DESC, id DESC
@@ -71,7 +71,58 @@ export class MessageRepository {
     `;
 
     const [rows] = await baseRepository.query(sql, [conversationId, parseInt(limit, 10)]);
-    return rows;
+    return rows.map((r) => ({
+      ...r,
+      is_edited: Boolean(r.is_edited),
+    }));
+  }
+
+  /**
+   * Find a single message by ID.
+   * @param {number|string} messageId
+   * @returns {Promise<Object|null>}
+   */
+  async findById(messageId) {
+    const sql = `
+      SELECT id, conversation_id, sender_type, message_type, content, audio_url, duration_seconds, token_count, is_edited, edited_at, created_at
+      FROM messages
+      WHERE id = ?
+      LIMIT 1
+    `;
+    const row = await baseRepository.queryOne(sql, [messageId]);
+    if (!row) return null;
+    return {
+      ...row,
+      is_edited: Boolean(row.is_edited),
+    };
+  }
+
+  /**
+   * Update message content and set edited timestamp.
+   * @param {number|string} messageId
+   * @param {string} content
+   * @param {number} [tokenCount]
+   * @returns {Promise<Object>}
+   */
+  async updateContent(messageId, content, tokenCount = 0) {
+    const sql = `
+      UPDATE messages
+      SET content = ?, token_count = ?, is_edited = TRUE, edited_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `;
+    await baseRepository.execute(sql, [content, tokenCount, messageId]);
+    return await this.findById(messageId);
+  }
+
+  /**
+   * Delete a message by ID.
+   * @param {number|string} messageId
+   * @returns {Promise<boolean>}
+   */
+  async deleteById(messageId) {
+    const sql = `DELETE FROM messages WHERE id = ?`;
+    const result = await baseRepository.execute(sql, [messageId]);
+    return result.affectedRows > 0;
   }
 
   /**
