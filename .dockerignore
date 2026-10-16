@@ -1,0 +1,13 @@
+node_modules
+.git
+.github
+uploads
+logs
+*.log
+.vscode
+.idea
+*.mp3
+*.wav
+*.m4a
+*.webm
+*.ogg
