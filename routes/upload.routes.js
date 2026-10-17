@@ -4,6 +4,8 @@ import authenticateToken from '../middleware/auth.middleware.js';
 import cloudinaryService from '../services/cloudinary.service.js';
 import characterRepository from '../repositories/character.repository.js';
 import userMindRepository from '../repositories/user-mind.repository.js';
+import userRepository from '../repositories/user.repository.js';
+import authService from '../services/auth.service.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -44,6 +46,42 @@ router.post('/image', authenticateToken, upload.single('image'), async (req, res
         url: result.url,
         public_id: result.public_id,
         provider: result.provider,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/upload/user-avatar
+ * Upload avatar image specifically for the authenticated user profile.
+ */
+router.post('/user-avatar', authenticateToken, upload.single('image'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NO_FILE', message: 'No image file was uploaded.' },
+      });
+    }
+
+    const result = await cloudinaryService.uploadImageBuffer(req.file.buffer, {
+      folder: 'ai_companion/user_avatars',
+      mimetype: req.file.mimetype,
+    });
+
+    const updated = await userRepository.updateProfile(req.user.id, {
+      avatar_url: result.url,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        url: result.url,
+        public_id: result.public_id,
+        provider: result.provider,
+        user: authService.sanitizeUser(updated),
       },
     });
   } catch (err) {

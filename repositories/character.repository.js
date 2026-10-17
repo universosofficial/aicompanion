@@ -151,6 +151,30 @@ export class CharacterRepository {
           c.risk_tier,
           (sub.id IS NOT NULL) AS is_subscribed,
           FALSE AS is_mind,
+          (
+            SELECT m.content
+            FROM messages m
+            JOIN conversations conv ON conv.id = m.conversation_id
+            WHERE conv.character_id = c.id AND conv.user_id = ?
+            ORDER BY m.id DESC
+            LIMIT 1
+          ) AS last_message,
+          (
+            SELECT m.created_at
+            FROM messages m
+            JOIN conversations conv ON conv.id = m.conversation_id
+            WHERE conv.character_id = c.id AND conv.user_id = ?
+            ORDER BY m.id DESC
+            LIMIT 1
+          ) AS last_message_at,
+          (
+            SELECT m.sender_type
+            FROM messages m
+            JOIN conversations conv ON conv.id = m.conversation_id
+            WHERE conv.character_id = c.id AND conv.user_id = ?
+            ORDER BY m.id DESC
+            LIMIT 1
+          ) AS last_message_sender,
           GREATEST(
             COALESCE(c.updated_at, c.created_at),
             COALESCE((
@@ -218,6 +242,27 @@ export class CharacterRepository {
           'balanced_quarter_kelly' AS risk_tier,
           TRUE AS is_subscribed,
           TRUE AS is_mind,
+          (
+            SELECT mcm.content
+            FROM mind_consultation_messages mcm
+            WHERE mcm.session_id = s.id
+            ORDER BY mcm.id DESC
+            LIMIT 1
+          ) AS last_message,
+          (
+            SELECT mcm.created_at
+            FROM mind_consultation_messages mcm
+            WHERE mcm.session_id = s.id
+            ORDER BY mcm.id DESC
+            LIMIT 1
+          ) AS last_message_at,
+          (
+            SELECT mcm.sender_type
+            FROM mind_consultation_messages mcm
+            WHERE mcm.session_id = s.id
+            ORDER BY mcm.id DESC
+            LIMIT 1
+          ) AS last_message_sender,
           COALESCE(s.last_message_at, m.updated_at, m.created_at) AS sort_time
         FROM user_minds m
         JOIN mind_consultation_sessions s ON s.mind_id = m.id AND s.visitor_user_id = ?
@@ -225,7 +270,16 @@ export class CharacterRepository {
       ORDER BY sort_time DESC
     `;
 
-    const [rows] = await baseRepository.query(sql, [userId, userId, userId, userId, userId]);
+    const [rows] = await baseRepository.query(sql, [
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+    ]);
     return rows.map((r) => this.formatCharacter(r));
   }
 

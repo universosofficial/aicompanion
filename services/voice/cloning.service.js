@@ -1,6 +1,8 @@
+import falVoiceService from './fal-voice.service.js';
 import cloudinaryService from '../cloudinary.service.js';
 import env from '../../config/env.js';
 import baseRepository from '../../repositories/base.repository.js';
+import sttService from './stt.service.js';
 
 export class VoiceCloningService {
   /**
@@ -135,34 +137,54 @@ export class VoiceCloningService {
       throw new Error('Valid audio sample is required for voice cloning.');
     }
 
-    // 1. Upload audio sample to Cloudinary (or local disk fallback) for persistent playback
+    // 1. Upload audio sample to fal cloud storage (with Cloudinary & disk fallback)
     let sampleUrl = null;
-    try {
-      const uploadResult = await cloudinaryService.uploadAudioBuffer(audioBuffer, {
-        folder: 'ai_companion/voice_samples',
-        mimetype: mimeType || 'audio/mpeg',
-        publicId: `voice_sample_${Date.now()}`,
-      });
-      sampleUrl = uploadResult.url;
-    } catch (err) {
-      console.warn('[VOICE CLONING] Cloudinary audio upload failed, proceeding with local fallback:', err.message);
+    if (falVoiceService.isConfigured()) {
       try {
-        const fs = await import('fs/promises');
-        const path = await import('path');
-        const uploadsDir = path.resolve('uploads', 'voice_samples');
-        await fs.mkdir(uploadsDir, { recursive: true });
-        const ext = filename ? path.extname(filename) || '.mp3' : '.mp3';
-        const localFileName = `voice_sample_${Date.now()}${ext}`;
-        const localFilePath = path.join(uploadsDir, localFileName);
-        await fs.writeFile(localFilePath, audioBuffer);
-        sampleUrl = `http://localhost:5005/uploads/voice_samples/${localFileName}`;
-      } catch (fsErr) {
-        sampleUrl = `data:${mimeType || 'audio/mpeg'};base64,${audioBuffer.toString('base64')}`;
+        sampleUrl = await falVoiceService.uploadAudioSample(audioBuffer, filename, mimeType);
+      } catch (fErr) {
+        console.warn('[VOICE CLONING] Fal storage sample upload failed, trying Cloudinary:', fErr.message);
+      }
+    }
+
+    if (!sampleUrl) {
+      try {
+        const uploadResult = await cloudinaryService.uploadAudioBuffer(audioBuffer, {
+          folder: 'ai_companion/voice_samples',
+          mimetype: mimeType || 'audio/mpeg',
+          publicId: `voice_sample_${Date.now()}`,
+        });
+        sampleUrl = uploadResult.url;
+      } catch (err) {
+        console.warn('[VOICE CLONING] Cloudinary audio upload failed, proceeding with local fallback:', err.message);
+        try {
+          const fs = await import('fs/promises');
+          const path = await import('path');
+          const uploadsDir = path.resolve('uploads', 'voice_samples');
+          await fs.mkdir(uploadsDir, { recursive: true });
+          const ext = filename ? path.extname(filename) || '.mp3' : '.mp3';
+          const localFileName = `voice_sample_${Date.now()}${ext}`;
+          const localFilePath = path.join(uploadsDir, localFileName);
+          await fs.writeFile(localFilePath, audioBuffer);
+          sampleUrl = `http://localhost:5005/uploads/voice_samples/${localFileName}`;
+        } catch (fsErr) {
+          sampleUrl = `data:${mimeType || 'audio/mpeg'};base64,${audioBuffer.toString('base64')}`;
+        }
       }
     }
 
     // 2. Compute accurate acoustic profile
     const acoustics = this.analyzeAcousticProfile(audioBuffer, filename, mimeType, name, meta);
+
+    let refText = '';
+    try {
+      const trans = await sttService.transcribeAudio(audioBuffer, filename, mimeType);
+      if (trans?.transcript) {
+        refText = trans.transcript.trim();
+      }
+    } catch (sttErr) {
+      console.warn('[VOICE CLONING AUTO-TRANSCRIBE NOTE]', sttErr.message);
+    }
 
     const defaultSettings = {
       stability: 0.75,
@@ -170,6 +192,9 @@ export class VoiceCloningService {
       speed: acoustics.speed,
       mappedPreset: acoustics.mappedPreset,
       estimatedPitchHz: acoustics.estimatedPitchHz,
+      voiceSampleUrl: sampleUrl,
+      sampleUrl,
+      ...(refText ? { ref_text: refText } : {}),
     };
 
     // 3. If ElevenLabs API Key is configured, execute real instantaneous voice cloning
@@ -198,6 +223,8 @@ export class VoiceCloningService {
             voiceId,
             voiceSampleUrl: sampleUrl,
             voiceProvider: 'cloned',
+            refText,
+            transcript: refText,
             voiceSettings: defaultSettings,
           };
         } else {
@@ -217,6 +244,8 @@ export class VoiceCloningService {
       voiceId: clonedProfileId,
       voiceSampleUrl: sampleUrl,
       voiceProvider: 'cloned',
+      refText,
+      transcript: refText,
       voiceSettings: defaultSettings,
     };
   }

@@ -115,6 +115,23 @@ export class MessageRepository {
   }
 
   /**
+   * Update message audio URL and duration.
+   * @param {number|string} messageId
+   * @param {string} audioUrl
+   * @param {number} [durationSeconds=null]
+   * @returns {Promise<Object>}
+   */
+  async updateAudio(messageId, audioUrl, durationSeconds = null) {
+    const sql = `
+      UPDATE messages
+      SET audio_url = ?, duration_seconds = COALESCE(?, duration_seconds), message_type = 'voice'
+      WHERE id = ?
+    `;
+    await baseRepository.execute(sql, [audioUrl, durationSeconds, messageId]);
+    return await this.findById(messageId);
+  }
+
+  /**
    * Delete a message by ID.
    * @param {number|string} messageId
    * @returns {Promise<boolean>}

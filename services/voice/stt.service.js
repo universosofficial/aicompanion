@@ -46,11 +46,29 @@ export class STTService {
       file,
       model: 'whisper-1',
       response_format: 'verbose_json',
-      temperature: 0.2,
+      temperature: 0.0,
+      prompt: 'Clear conversational speech.',
     });
 
+    let rawTranscript = (response.text || '').trim();
+
+    // 1. Remove common Whisper hallucinations (music, subtitles, filler tags)
+    rawTranscript = rawTranscript
+      .replace(/\[(?:music|applause|laughter|silence|snort|cough)\]/gi, '')
+      .replace(/\((?:music|applause|laughter|silence)\)/gi, '')
+      .replace(/thank you for watching[.!]/gi, '')
+      .replace(/subtitles by [^.]+/gi, '')
+      .trim();
+
+    // 2. Collapse repetitive phrase loops (e.g. "phrase. phrase. phrase.")
+    // Detects repeated sequences of 1-5 words repeated 2 or more times
+    const cleanedTranscript = rawTranscript
+      .replace(/(\b[\w'-]+(?:\s+[\w'-]+){0,4}[.?!,]?)\s+(?:\1\s*){2,}/gi, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+
     return {
-      transcript: (response.text || '').trim(),
+      transcript: cleanedTranscript,
       duration: response.duration || null,
       language: response.language || 'en',
     };

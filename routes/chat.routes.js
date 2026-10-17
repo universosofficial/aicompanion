@@ -21,4 +21,10 @@ router.patch('/messages/:id', (req, res, next) => chatController.editMessage(req
 router.delete('/messages/:id', (req, res, next) => chatController.deleteMessage(req, res, next));
 router.post('/voice-turn', upload.single('audio'), (req, res, next) => voiceController.voiceTurn(req, res, next));
 
+// Fal.ai F5-TTS speak message endpoints
+router.post('/messages/:messageId/speak', (req, res, next) => chatController.speakMessage(req, res, next));
+router.get('/messages/:messageId/speak', (req, res, next) => chatController.speakMessage(req, res, next));
+router.post('/:messageId/speak', (req, res, next) => chatController.speakMessage(req, res, next));
+router.get('/:messageId/speak', (req, res, next) => chatController.speakMessage(req, res, next));
+
 export default router;

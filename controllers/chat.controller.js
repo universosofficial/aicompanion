@@ -1,5 +1,10 @@
 import chatService from '../services/chat.service.js';
 import aiOrchestrator from '../services/ai/ai.orchestrator.js';
+import falVoiceService from '../services/voice/fal-voice.service.js';
+import ttsService from '../services/voice/tts.service.js';
+import messageRepository from '../repositories/message.repository.js';
+import conversationRepository from '../repositories/conversation.repository.js';
+import characterRepository from '../repositories/character.repository.js';
 
 export class ChatController {
   /**
@@ -212,6 +217,129 @@ export class ChatController {
       return res.json({
         success: true,
         data: result,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  /**
+   * POST/GET /api/chat/:messageId/speak or /api/chat/messages/:messageId/speak
+   * Synthesize voice for a given chat message using fal.ai F5-TTS
+   */
+  async speakMessage(req, res, next) {
+    try {
+      const messageId = req.params.messageId || req.params.id;
+      if (!messageId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_MESSAGE_ID',
+            message: 'Message ID is required.',
+          },
+        });
+      }
+
+      const message = await messageRepository.findById(messageId);
+      if (!message) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'MESSAGE_NOT_FOUND',
+            message: `Message with ID ${messageId} was not found.`,
+          },
+        });
+      }
+
+      // Check conversation & user authorization
+      const conversation = await conversationRepository.findById(message.conversation_id, req.user?.id);
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'CONVERSATION_NOT_FOUND',
+            message: 'Conversation not found or access denied.',
+          },
+        });
+      }
+
+      // Look up character
+      let character = null;
+      if (conversation.character_id) {
+        character = await characterRepository.findById(conversation.character_id);
+      }
+
+      // Synthesize audio using fal.ai F5-TTS with character reference audio or default
+      const textToSpeak = (message.content || '').trim();
+      if (!textToSpeak) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'EMPTY_CONTENT',
+            message: 'Message has no text content to synthesize into speech.',
+          },
+        });
+      }
+
+      const refAudioUrl = character?.voice_sample_url || null;
+      let refText = '';
+      if (character?.voice_settings) {
+        try {
+          const vs = typeof character.voice_settings === 'string'
+            ? JSON.parse(character.voice_settings)
+            : character.voice_settings;
+          refText = vs?.ref_text || '';
+        } catch {
+          refText = '';
+        }
+      }
+
+      let speechResult;
+      if (falVoiceService.isConfigured()) {
+        try {
+          speechResult = await falVoiceService.generateSpeech({
+            text: textToSpeak,
+            refAudioUrl,
+            refText,
+            modelType: 'F5-TTS',
+            removeSilence: true,
+          });
+        } catch (falErr) {
+          console.warn('[CHAT SPEAK] Fal.ai F5-TTS synthesis failed, falling back:', falErr.message);
+          speechResult = await ttsService.generateSpeechUrl({
+            text: textToSpeak,
+            refAudioUrl,
+            voiceSettings: character?.voice_settings,
+            refText,
+          });
+        }
+      } else {
+        speechResult = await ttsService.generateSpeechUrl({
+          text: textToSpeak,
+          refAudioUrl,
+          voiceSettings: character?.voice_settings,
+          refText,
+        });
+      }
+
+      const audioUrl = speechResult.audioUrl;
+      const durationSeconds = speechResult.duration || Math.max(1, Math.round(textToSpeak.length / 14));
+
+      // Persist updated audio URL onto the message
+      const updatedMessage = await messageRepository.updateAudio(message.id, audioUrl, durationSeconds);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Speech synthesized successfully via fal.ai F5-TTS.',
+        data: {
+          messageId: message.id,
+          audioUrl,
+          durationSeconds,
+          text: message.content,
+          characterId: character?.id || null,
+          characterName: character?.name || null,
+          message: updatedMessage,
+        },
       });
     } catch (err) {
       return next(err);

@@ -40,11 +40,14 @@ export const env = Object.freeze({
   CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || '',
   CLOUDINARY_URL: process.env.CLOUDINARY_URL || '',
   ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || '',
+  FAL_KEY: process.env.FAL_KEY || '',
   API_FOOTBALL_KEY: process.env.API_FOOTBALL_KEY || '',
   THE_ODDS_API_KEY: process.env.THE_ODDS_API_KEY || '',
   VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY || '',
   VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || '',
-  VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'mailto:support@aicompanion.app',
+  VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'mailto:support@univasos.com',
+  RESEND_API_KEY: process.env.RESEND_API_KEY || '',
+  RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL || 'Univasos <onboarding@resend.dev>',
 });
 
 export default env;

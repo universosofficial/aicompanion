@@ -2,7 +2,9 @@ import pool from '../config/database.js';
 import characterRepository from '../repositories/character.repository.js';
 import conversationRepository from '../repositories/conversation.repository.js';
 import messageRepository from '../repositories/message.repository.js';
+import userRepository from '../repositories/user.repository.js';
 import pushService from '../services/notifications/push.service.js';
+import resendService from '../services/email/resend.service.js';
 import { OpenAiService } from '../services/ai/openai.service.js';
 import { buildProactiveInitiationPrompt } from '../services/ai/prompt.service.js';
 
@@ -158,6 +160,23 @@ export async function runProactiveCheckinEvaluation({ skipQuietHoursCheck = fals
       icon: character.avatar_url || 'https://api.dicebear.com/9.x/bottts/svg?seed=' + encodeURIComponent(character.name),
       dataUrl: `/chat/${character.id}`,
       characterId: character.id,
+    });
+
+    // Dispatch Email Notification via Resend
+    userRepository.findById(userId).then((user) => {
+      if (user && user.email) {
+        return resendService.sendNotificationEmail({
+          to: user.email,
+          title: `Message from ${character.name}`,
+          message: proactiveText,
+          companionName: character.name,
+          companionAvatar: character.avatar_url || '',
+          actionUrl: `${process.env.APP_URL || 'http://localhost:4200'}/chat/${character.id}`,
+          actionText: `Reply to ${character.name}`,
+        });
+      }
+    }).catch((emailErr) => {
+      console.warn(`[PROACTIVE EVALUATION] Failed to dispatch Resend email to User ${userId}:`, emailErr.message);
     });
 
     const reason = openThread ? 'open_thread_followup' : 'inactivity_checkin';

@@ -486,7 +486,7 @@ export class MindsDiscoveryController {
       await mindKnowledgeRepository.createConsultationMessage(
         session.id,
         'system',
-        `✨ Direct Human Access Unlocked ($${price}). Context brief handed over to ${mind.display_name} — you are now connected directly with the real person (${mind.direct_chat_sla || 'Replies personally within a few hours'}).`
+        `✨ Direct Human Access Unlocked (${price} ◈ Vasos). Context brief handed over to ${mind.display_name} — you are now connected directly with the real person (${mind.direct_chat_sla || 'Replies personally within a few hours'}).`
       );
 
       // If the visitor typed a direct priority note for the real person, append it right into the thread
@@ -509,6 +509,8 @@ export class MindsDiscoveryController {
             chat_mode: updatedSession.chat_mode || 'human_direct',
             is_paid_unlocked: Boolean(updatedSession.is_paid_unlocked),
             paid_amount: Number(updatedSession.paid_amount || price),
+            currency: 'VASO',
+            token_symbol: '◈',
             handoff_summary: updatedSession.handoff_summary || handoffSummary,
             escalation_note: updatedSession.escalation_note || null,
             escalated_at: updatedSession.escalated_at || new Date().toISOString(),

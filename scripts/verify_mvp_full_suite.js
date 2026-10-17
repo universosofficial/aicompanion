@@ -18,7 +18,7 @@ function assert(condition, testName, details = '') {
 
 async function runMvpTestSuite() {
   console.log('====================================================');
-  console.log('   LUMINA / HAVEN MVP SYSTEM-WIDE VALIDATION SUITE   ');
+  console.log('       UNIVASOS MVP SYSTEM-WIDE VALIDATION SUITE    ');
   console.log('====================================================\n');
 
   // ----------------------------------------------------

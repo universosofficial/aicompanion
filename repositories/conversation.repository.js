@@ -42,21 +42,33 @@ export class ConversationRepository {
   }
 
   /**
-   * Find conversation by ID verifying user ownership.
+   * Find conversation by ID, optionally verifying user ownership.
    * @param {number|string} id
-   * @param {number|string} userId
+   * @param {number|string} [userId=null]
    * @returns {Promise<Object|null>}
    */
-  async findById(id, userId) {
+  async findById(id, userId = null) {
+    if (userId) {
+      const sql = `
+        SELECT 
+          id, user_id, character_id, title, is_pinned, 
+          last_message_at, created_at, updated_at
+        FROM conversations
+        WHERE id = ? AND user_id = ?
+        LIMIT 1
+      `;
+      return await baseRepository.queryOne(sql, [id, userId]);
+    }
+
     const sql = `
       SELECT 
         id, user_id, character_id, title, is_pinned, 
         last_message_at, created_at, updated_at
       FROM conversations
-      WHERE id = ? AND user_id = ?
+      WHERE id = ?
       LIMIT 1
     `;
-    return await baseRepository.queryOne(sql, [id, userId]);
+    return await baseRepository.queryOne(sql, [id]);
   }
 
   /**

@@ -133,7 +133,7 @@ app.use(errorHandler);
 // Start Server
 const server = app.listen(env.PORT, async () => {
   console.log('====================================================');
-  console.log(` AI COMPANION BACKEND running on port ${env.PORT}`);
+  console.log(` UNIVASOS BACKEND running on port ${env.PORT}`);
   console.log(` Mode: ${env.NODE_ENV}`);
   console.log(` Health Endpoint:     http://localhost:${env.PORT}/api/health`);
   console.log(` Auth Endpoint:       http://localhost:${env.PORT}/api/auth`);

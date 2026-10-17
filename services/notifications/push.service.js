@@ -6,12 +6,13 @@ import conversationRepository from '../../repositories/conversation.repository.j
 import messageRepository from '../../repositories/message.repository.js';
 import { OpenAiService } from '../ai/openai.service.js';
 import { buildProactiveInitiationPrompt } from '../ai/prompt.service.js';
+import resendService from '../email/resend.service.js';
 
 // Configure VAPID details if keys are present
 if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
   try {
     webpush.setVapidDetails(
-      env.VAPID_SUBJECT || 'mailto:support@aicompanion.app',
+      env.VAPID_SUBJECT || 'mailto:support@univasos.com',
       env.VAPID_PUBLIC_KEY,
       env.VAPID_PRIVATE_KEY
     );
@@ -105,7 +106,7 @@ export class PushNotificationService {
     }
 
     const payload = JSON.stringify({
-      title: title || 'New companion check-in',
+      title: title || 'Univasos Check-In',
       body: body || '',
       icon: icon || '/favicon.ico',
       badge: badge || '/favicon.ico',
@@ -231,6 +232,25 @@ export class PushNotificationService {
 
     console.log(`[TEST PROACTIVE] Push notification dispatch result:`, pushResult);
 
+    // Dispatch Email Notification via Resend
+    let emailResult = null;
+    const [userRows] = await pool.query('SELECT email FROM users WHERE id = ? LIMIT 1', [userId]);
+    if (userRows && userRows.length > 0 && userRows[0].email) {
+      try {
+        emailResult = await resendService.sendNotificationEmail({
+          to: userRows[0].email,
+          title: `New message from ${character.name}`,
+          message: messageText,
+          companionName: character.name,
+          companionAvatar: character.avatar_url,
+          actionUrl: `https://univasos.com/dashboard/chat/${character.id}`,
+          actionText: `Reply to ${character.name}`,
+        });
+        console.log(`[TEST PROACTIVE] Email notification sent via Resend to ${userRows[0].email}`);
+      } catch (e) {
+        console.warn(`[NOTIFICATION EMAIL ERROR] Failed to send email via Resend to ${userRows[0].email}:`, e.message);
+      }
+    }
     // 8. Log to proactive_dispatch_log
     await pool.query(
       `INSERT INTO proactive_dispatch_log (user_id, character_id, message_id, dispatch_reason)

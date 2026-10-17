@@ -5,12 +5,12 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * AuthController
- * Handles incoming authentication and token cycle HTTP requests.
+ * Handles incoming authentication, email verification, 2FA OTPs, password resets, and token requests.
  */
 export class AuthController {
   /**
    * POST /api/auth/register
-   * Registers a new user account.
+   * Registers a new user account and dispatches verification OTP via Resend.
    */
   async register(req, res, next) {
     try {
@@ -41,7 +41,67 @@ export class AuthController {
 
       return res.status(201).json({
         success: true,
-        message: 'Account registered successfully.',
+        message: result.message || 'Verification code sent to your email.',
+        data: result,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/auth/verify-email
+   * Confirms registration OTP and issues initial session tokens.
+   */
+  async verifyEmail(req, res, next) {
+    try {
+      const { email, code } = req.body;
+
+      if (!email || !code) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_FIELDS',
+            message: 'Email and 6-digit verification code are required.',
+          },
+        });
+      }
+
+      const result = await authService.verifyEmail({ email, code });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Email verified successfully. Welcome to Univasos!',
+        data: result,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/auth/resend-verification
+   * Resends registration verification code.
+   */
+  async resendVerification(req, res, next) {
+    try {
+      const { email } = req.body;
+
+      if (!email || typeof email !== 'string' || !EMAIL_REGEX.test(email.trim())) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_EMAIL',
+            message: 'A valid email address is required.',
+          },
+        });
+      }
+
+      const result = await authService.resendVerificationCode(email);
+
+      return res.status(200).json({
+        success: true,
+        message: result.message,
         data: result,
       });
     } catch (error) {
@@ -51,7 +111,7 @@ export class AuthController {
 
   /**
    * POST /api/auth/login
-   * Authenticates user credentials and issues JWT tokens.
+   * Validates credentials and sends a 2FA login verification code via Resend.
    */
   async login(req, res, next) {
     try {
@@ -71,7 +131,127 @@ export class AuthController {
 
       return res.status(200).json({
         success: true,
-        message: 'Authentication successful.',
+        message: result.message || 'Login successful.',
+        data: result,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/auth/verify-login-code
+   * Validates 2FA login OTP and issues JWT access & refresh tokens.
+   */
+  async verifyLoginCode(req, res, next) {
+    try {
+      const { email, code } = req.body;
+
+      if (!email || !code) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_FIELDS',
+            message: 'Email and 6-digit login verification code are required.',
+          },
+        });
+      }
+
+      const result = await authService.verifyLoginCode({ email, code });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Login verification successful.',
+        data: result,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/auth/resend-login-code
+   * Resends 2FA login verification code.
+   */
+  async resendLoginCode(req, res, next) {
+    try {
+      const { email } = req.body;
+
+      if (!email || typeof email !== 'string' || !EMAIL_REGEX.test(email.trim())) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_EMAIL',
+            message: 'A valid email address is required.',
+          },
+        });
+      }
+
+      const result = await authService.resendLoginCode(email);
+
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/auth/forgot-password
+   * Initiates password recovery flow and sends 6-digit code via Resend.
+   */
+  async forgotPassword(req, res, next) {
+    try {
+      const { email } = req.body;
+
+      if (!email || typeof email !== 'string' || !EMAIL_REGEX.test(email.trim())) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_EMAIL',
+            message: 'A valid email address is required.',
+          },
+        });
+      }
+
+      const result = await authService.forgotPassword(email);
+
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/auth/reset-password
+   * Verifies reset code and updates account password.
+   */
+  async resetPassword(req, res, next) {
+    try {
+      const { email, code, newPassword } = req.body;
+
+      if (!email || !code || !newPassword) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_FIELDS',
+            message: 'Email, verification code, and new password are required.',
+          },
+        });
+      }
+
+      const result = await authService.resetPassword({ email, code, newPassword });
+
+      return res.status(200).json({
+        success: true,
+        message: result.message,
         data: result,
       });
     } catch (error) {
@@ -145,8 +325,66 @@ export class AuthController {
       return res.status(200).json({
         success: true,
         data: {
-          user,
+          user: authService.sanitizeUser(user),
         },
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * PUT /api/auth/profile
+   * Updates profile information (display_name, avatar_url, bio, phone, location).
+   */
+  async updateProfile(req, res, next) {
+    try {
+      const { display_name, avatar_url, bio, phone, location } = req.body;
+      const updatedUser = await authService.updateProfile(req.user.id, {
+        display_name,
+        avatar_url,
+        bio,
+        phone,
+        location,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Profile updated successfully.',
+        data: {
+          user: updatedUser,
+        },
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * POST /api/auth/change-password
+   * Changes authenticated user password with current password verification.
+   */
+  async changePassword(req, res, next) {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_FIELDS',
+            message: 'Both current password and new password are required.',
+          },
+        });
+      }
+
+      const result = await authService.changePassword(req.user.id, {
+        currentPassword,
+        newPassword,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: result.message || 'Password updated successfully.',
       });
     } catch (error) {
       return next(error);

@@ -163,7 +163,16 @@ export class VoiceController {
   async speakText(req, res, next) {
     const startTime = Date.now();
     try {
-      const { text, voiceId = 'alloy', voiceSettings = {}, provider = 'preset', format } = req.body;
+      const {
+        text,
+        voiceId = 'alloy',
+        voiceSettings = {},
+        provider = 'preset',
+        format,
+        voiceSampleUrl,
+        refAudioUrl,
+        refText,
+      } = req.body;
 
       if (!text || !text.trim()) {
         return res.status(400).json({
@@ -175,11 +184,35 @@ export class VoiceController {
         });
       }
 
+      let resolvedRefUrl = refAudioUrl || voiceSampleUrl || voiceSettings?.voiceSampleUrl || voiceSettings?.sampleUrl || null;
+      let resolvedRefText = refText || voiceSettings?.ref_text || voiceSettings?.transcript || '';
+
+      // If reference audio is missing but voiceId is a cloned voice ID, query character repository
+      if (!resolvedRefUrl && voiceId && voiceId.startsWith('cloned_')) {
+        try {
+          const [rows] = await baseRepository.query(
+            'SELECT voice_sample_url, voice_settings FROM characters WHERE voice_id = ? LIMIT 1',
+            [voiceId]
+          );
+          if (rows && rows.length > 0 && rows[0].voice_sample_url) {
+            resolvedRefUrl = rows[0].voice_sample_url;
+            const vs = typeof rows[0].voice_settings === 'string'
+              ? JSON.parse(rows[0].voice_settings || '{}')
+              : (rows[0].voice_settings || {});
+            resolvedRefText = vs?.ref_text || resolvedRefText;
+          }
+        } catch (dbErr) {
+          console.warn('[VOICE CONTROLLER] Cloned voice DB lookup note:', dbErr.message);
+        }
+      }
+
       const audioBuffer = await ttsService.generateSpeechBuffer({
         text,
         voiceId,
         voiceSettings,
-        provider,
+        provider: resolvedRefUrl ? 'cloned' : provider,
+        refAudioUrl: resolvedRefUrl,
+        refText: resolvedRefText,
       });
 
       const latencyMs = Date.now() - startTime;
@@ -418,12 +451,18 @@ export class VoiceController {
           await voiceCloningService.ensureClonedVoice(character);
         }
 
+        const vs = typeof character.voice_settings === 'string'
+          ? (() => { try { return JSON.parse(character.voice_settings); } catch { return {}; } })()
+          : (character.voice_settings || {});
+
         // Synthesize Assistant Voice Audio
         const assistantAudioBuffer = await ttsService.generateSpeechBuffer({
           text: replyText,
           voiceId: character.voice_id || 'alloy',
           provider: character.voice_provider || 'preset',
-          voiceSettings: character.voice_settings || {},
+          voiceSettings: vs,
+          refAudioUrl: character.voice_sample_url || vs?.voiceSampleUrl || vs?.sampleUrl || null,
+          refText: vs?.ref_text || '',
         });
 
         // Save assistant voice note audio file
@@ -582,12 +621,18 @@ export class VoiceController {
           await voiceCloningService.ensureClonedMindVoice(mind);
         }
 
+        const mvs = typeof mind.voice_settings === 'string'
+          ? (() => { try { return JSON.parse(mind.voice_settings); } catch { return {}; } })()
+          : (mind.voice_settings || {});
+
         // Synthesize speech using Mind's configured voice profile
         const mindAudioBuffer = await ttsService.generateSpeechBuffer({
           text: replyText,
           voiceId: mind.voice_id || 'echo',
           provider: mind.voice_provider || 'preset',
-          voiceSettings: mind.voice_settings || {},
+          voiceSettings: mvs,
+          refAudioUrl: mind.voice_sample_url || mvs?.voiceSampleUrl || mvs?.sampleUrl || null,
+          refText: mvs?.ref_text || '',
         });
 
         // Save assistant voice note audio file

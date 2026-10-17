@@ -69,6 +69,13 @@ export async function testConnection(retries = 3, delayMs = 2000) {
         `ALTER TABLE mind_consultation_sessions ADD COLUMN unread_for_creator INT NOT NULL DEFAULT 0`,
         `ALTER TABLE mind_consultation_sessions ADD COLUMN escalated_at TIMESTAMP NULL`,
         `ALTER TABLE mind_consultation_messages MODIFY COLUMN sender_type VARCHAR(32) NOT NULL DEFAULT 'user'`,
+        `ALTER TABLE users ADD COLUMN vasos_balance INT NOT NULL DEFAULT 999999`,
+        `ALTER TABLE users ADD COLUMN has_unlimited_vasos TINYINT(1) NOT NULL DEFAULT 1`,
+        `ALTER TABLE users ADD COLUMN display_name VARCHAR(100) NULL`,
+        `ALTER TABLE users ADD COLUMN avatar_url VARCHAR(500) NULL`,
+        `ALTER TABLE users ADD COLUMN bio TEXT NULL`,
+        `ALTER TABLE users ADD COLUMN phone VARCHAR(50) NULL`,
+        `ALTER TABLE users ADD COLUMN location VARCHAR(100) NULL`,
       ];
       for (const stmt of alterStatements) {
         try {
