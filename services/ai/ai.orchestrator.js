@@ -10,6 +10,8 @@ import sportsRepository from '../../repositories/sports.repository.js';
 import sportsApiService from '../sports/sports-api.service.js';
 import quantService from '../sports/quant.service.js';
 import { extractMatchFromText, detectTiltIntent, detectSportsIntent } from '../sports/sports-detector.js';
+import ttsService from '../voice/tts.service.js';
+import moderationService from './moderation.service.js';
 
 export const sportsToolDefinition = {
   type: "function",
@@ -107,6 +109,16 @@ export class AiOrchestrator {
         }
       }
     }
+
+    // 2.5 Safety & Moderation Analysis
+    const moderation = await moderationService.checkContent(content, { isPublic });
+    if (moderation.isHardViolation) {
+      const err = new Error(moderation.reason || 'This message violates Univasos safety policies.');
+      err.statusCode = 400;
+      err.code = 'POLICY_VIOLATION';
+      throw err;
+    }
+    const isCrisis = Boolean(moderation.isCrisis);
 
     // 3. Persist incoming user message immediately
     const userTokenCount = Math.ceil(content.length / 4);
@@ -238,6 +250,8 @@ export class AiOrchestrator {
       }
     }
 
+    const isVoiceNoteRequest = /(?:voice\s*note|voice\s*memo|voice\s*message|audio\s*note|audio\s*message|speak\s*to\s*me|send\s*(?:me\s*)?(?:a\s*)?voice)/i.test(content);
+
     // 6. Build enriched composite system prompt
     const systemPrompt = promptService.buildSystemPrompt({
       character,
@@ -249,6 +263,8 @@ export class AiOrchestrator {
       bankrollContext,
       tiltWarning,
       conversationMode,
+      isVoiceNote: isVoiceNoteRequest,
+      isCrisis,
     });
 
     // 7. Format messages array for OpenAI
@@ -286,12 +302,43 @@ export class AiOrchestrator {
       return;
     }
 
-    // 9. Persist assistant reply to database
+    // 9. If user asked for a voice note, synthesize audio and save as voice message
+    let assistantAudioUrl = null;
+    let assistantDurationSeconds = null;
+
+    if (isVoiceNoteRequest && fullAssistantResponse.trim()) {
+      try {
+        const vs = typeof character.voice_settings === 'string'
+          ? (() => { try { return JSON.parse(character.voice_settings); } catch { return {}; } })()
+          : (character.voice_settings || {});
+
+        const speechRes = await ttsService.generateSpeechUrl({
+          text: fullAssistantResponse.trim(),
+          voiceId: character.voice_id || 'alloy',
+          provider: character.voice_provider || 'preset',
+          voiceSettings: vs,
+          refAudioUrl: character.voice_sample_url || vs?.voiceSampleUrl || vs?.sampleUrl || null,
+          refText: vs?.ref_text || '',
+        });
+
+        if (speechRes?.audioUrl) {
+          assistantAudioUrl = speechRes.audioUrl;
+          assistantDurationSeconds = speechRes.duration || Math.max(45, Math.round(fullAssistantResponse.length / 14));
+        }
+      } catch (voiceErr) {
+        console.warn('[ORCHESTRATOR] Auto voice note synthesis notice:', voiceErr.message);
+      }
+    }
+
+    // Persist assistant reply to database
     const assistantTokenCount = Math.ceil(fullAssistantResponse.length / 4);
     const savedAssistantMessage = await messageRepository.create({
       conversationId: conversation.id,
       senderType: 'assistant',
+      messageType: assistantAudioUrl ? 'voice' : 'text',
       content: fullAssistantResponse,
+      audioUrl: assistantAudioUrl,
+      durationSeconds: assistantDurationSeconds,
       tokenCount: assistantTokenCount,
     });
 
@@ -307,6 +354,8 @@ export class AiOrchestrator {
     // 11. Notify completion with optional sports intelligence metadata
     onDone({
       conversationId: conversation.id,
+      crisisDetected: isCrisis,
+      crisisHotline: isCrisis ? moderation.crisisHotline : null,
       character: {
         id: character.id,
         name: character.name,

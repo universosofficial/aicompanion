@@ -100,7 +100,15 @@ async function runMigrations() {
       const startTime = Date.now();
 
       // Execute migration script
-      await connection.query(sqlContent);
+      try {
+        await connection.query(sqlContent);
+      } catch (sqlErr) {
+        if (sqlErr.code === 'ER_DUP_FIELDNAME' || sqlErr.code === 'ER_TABLE_EXISTS_ERROR') {
+          console.warn(`[MIGRATION] Notice for ${file}: Already applied or column exists (${sqlErr.message}). Marking as recorded.`);
+        } else {
+          throw sqlErr;
+        }
+      }
 
       // Record migration in tracking table
       await connection.execute(

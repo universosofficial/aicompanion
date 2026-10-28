@@ -320,11 +320,12 @@ export class CharacterRepository {
       'is_public', 'is_verified', 'handle', 'headline', 'website_url', 'philosophy_statement',
       'decision_frameworks', 'mental_models', 'tags', 'total_subscribers',
       'is_sports_analyst', 'analysis_style', 'primary_leagues', 'risk_tier',
+      'allow_proactive_checkins', 'proactive_frequency', 'proactive_preferred_time', 'proactive_channels',
     ];
 
     const jsonFields = [
       'interests', 'nicknames_for_user', 'catchphrases', 'decision_frameworks',
-      'mental_models', 'tags', 'voice_settings', 'primary_leagues',
+      'mental_models', 'tags', 'voice_settings', 'primary_leagues', 'proactive_channels',
     ];
 
     for (const field of allowedFields) {
@@ -351,7 +352,7 @@ export class CharacterRepository {
     const sql = `
       UPDATE characters
       SET ${fields.join(', ')}
-      WHERE id = ? AND user_id = ? AND is_system = FALSE
+      WHERE id = ? AND (user_id = ? OR is_system = TRUE)
     `;
 
     values.push(id, userId);
@@ -432,6 +433,11 @@ export class CharacterRepository {
       primary_leagues: parseJsonArray(row.primary_leagues),
       risk_tier: row.risk_tier || 'balanced_quarter_kelly',
       allow_proactive_checkins: row.allow_proactive_checkins !== undefined ? Boolean(row.allow_proactive_checkins) : true,
+      proactive_frequency: row.proactive_frequency || '24h',
+      proactive_preferred_time: row.proactive_preferred_time || 'anytime',
+      proactive_channels: typeof row.proactive_channels === 'string'
+        ? (() => { try { return JSON.parse(row.proactive_channels); } catch { return { push: true, email: true }; } })()
+        : (row.proactive_channels || { push: true, email: true }),
     };
   }
 

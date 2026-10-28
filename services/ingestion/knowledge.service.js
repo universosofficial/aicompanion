@@ -2,6 +2,7 @@ import webScraperService from './web-scraper.service.js';
 import documentParserService from './document-parser.service.js';
 import chunkerService from './chunker.service.js';
 import mindKnowledgeRepository from '../../repositories/mind-knowledge.repository.js';
+import moderationService from '../ai/moderation.service.js';
 
 /**
  * KnowledgeService
@@ -30,6 +31,12 @@ class KnowledgeService {
     try {
       const scraped = await webScraperService.scrapeUrl(url);
       const effectiveTitle = options.title || scraped.title || url;
+
+      // Verify content moderation for public/shared knowledge base
+      const moderation = await moderationService.checkContent(scraped.content, { isPublic: true });
+      if (moderation.isHardViolation) {
+        throw new Error(`Ingestion blocked by safety policy: ${moderation.reason || 'Content contains prohibited material.'}`);
+      }
 
       // Slice into searchable chunks with context headers (~500 tokens)
       const chunks = chunkerService.chunkText(scraped.content, {
@@ -118,6 +125,12 @@ class KnowledgeService {
       const parsed = await documentParserService.parseDocument(fileBuffer, originalFilename);
       const effectiveTitle = options.title || parsed.title || originalFilename;
 
+      // Verify content moderation for uploaded document
+      const moderation = await moderationService.checkContent(parsed.content, { isPublic: true });
+      if (moderation.isHardViolation) {
+        throw new Error(`Document ingestion blocked by safety policy: ${moderation.reason || 'Document contains prohibited material.'}`);
+      }
+
       const chunks = chunkerService.chunkText(parsed.content, {
         title: effectiveTitle,
         topic: options.topic || parsed.format,
@@ -176,6 +189,12 @@ class KnowledgeService {
     });
 
     try {
+      // Verify content moderation for manual doctrine
+      const moderation = await moderationService.checkContent(content, { isPublic: true });
+      if (moderation.isHardViolation) {
+        throw new Error(`Manual doctrine blocked by safety policy: ${moderation.reason || 'Content contains prohibited material.'}`);
+      }
+
       const chunks = chunkerService.chunkText(content.trim(), {
         title: effectiveTitle,
         topic,

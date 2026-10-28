@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import env from '../../config/env.js';
 import falVoiceService from './fal-voice.service.js';
+import cloudinaryService from '../cloudinary.service.js';
 
 /**
  * Curated preset voices with emotional relationship tags and descriptions.
@@ -101,13 +102,16 @@ export class TTSService {
    * @param {Object} [params.voiceSettings]
    * @returns {Promise<{ audioUrl: string, duration?: number }>}
    */
-  async generateSpeechUrl({ text, refAudioUrl = null, voiceSettings = {}, refText = '' }) {
+  async generateSpeechUrl({ text, voiceId = 'alloy', voiceSettings = {}, provider = 'preset', refAudioUrl = null, refText = '' }) {
     const cleanText = (text || '').trim();
     if (!cleanText) {
       throw new Error('Text is required for speech synthesis.');
     }
 
-    if (falVoiceService.isConfigured()) {
+    const isCloned = provider === 'cloned' && Boolean(refAudioUrl || voiceSettings?.voiceSampleUrl || voiceSettings?.sampleUrl);
+
+    // 1. Cloned voice: fal.ai F5-TTS
+    if (isCloned && falVoiceService.isConfigured()) {
       try {
         const refUrl = refAudioUrl || voiceSettings?.voiceSampleUrl || voiceSettings?.sampleUrl || null;
         const textRef = refText || voiceSettings?.ref_text || voiceSettings?.transcript || '';
@@ -123,16 +127,38 @@ export class TTSService {
       }
     }
 
-    // Fallback: generate buffer and return data URI
-    const buffer = await this.generateSpeechBuffer({ text: cleanText, voiceSettings, refAudioUrl, refText });
+    // 2. Preset voice: Fast OpenAI TTS API (tts-1, ~1 second response)
+    const buffer = await this.generateSpeechBuffer({ text: cleanText, voiceId, voiceSettings, provider: 'preset', refAudioUrl, refText });
+    
+    // Store in Cloudinary for streaming URL if configured
+    if (cloudinaryService && cloudinaryService.isConfigured()) {
+      try {
+        const cRes = await cloudinaryService.uploadAudioBuffer(buffer, {
+          folder: 'ai_companion/voice_notes',
+          mimetype: 'audio/mpeg',
+          publicId: `vn_${Date.now()}`,
+        });
+        if (cRes?.url) {
+          return {
+            audioUrl: cRes.url,
+            duration: Math.max(1, Math.round(cleanText.length / 15)),
+            contentType: 'audio/mpeg',
+          };
+        }
+      } catch (cErr) {
+        console.warn('[TTS CLOUDINARY UPLOAD NOTICE]', cErr.message);
+      }
+    }
+
     return {
       audioUrl: `data:audio/mpeg;base64,${buffer.toString('base64')}`,
+      duration: Math.max(1, Math.round(cleanText.length / 15)),
       contentType: 'audio/mpeg',
     };
   }
 
   /**
-   * Generate raw speech audio buffer from text (powered by fal.ai F5-TTS with OpenAI fallback).
+   * Generate raw speech audio buffer from text (powered by fast OpenAI TTS for presets, fal.ai for cloned).
    * @param {Object} params
    * @param {string} params.text - Text to synthesize
    * @param {string} [params.voiceId='alloy'] - Preset voice id or external cloned id
@@ -147,9 +173,10 @@ export class TTSService {
     }
 
     const cleanText = text.trim();
+    const isCloned = provider === 'cloned' && Boolean(refAudioUrl || voiceSettings?.voiceSampleUrl || voiceSettings?.sampleUrl);
 
-    // 1. Primary Engine: fal.ai F5-TTS
-    if (falVoiceService.isConfigured()) {
+    // 1. Cloned voice: fal.ai F5-TTS
+    if (isCloned && falVoiceService.isConfigured()) {
       try {
         const refUrl = refAudioUrl || voiceSettings?.voiceSampleUrl || voiceSettings?.sampleUrl || null;
         const textRef = refText || voiceSettings?.ref_text || voiceSettings?.transcript || '';
@@ -164,25 +191,11 @@ export class TTSService {
           return falBuffer;
         }
       } catch (falErr) {
-        console.warn('[TTS] fal.ai F5-TTS buffer generation failed, falling back to secondary providers:', falErr.message);
+        console.warn('[TTS] fal.ai F5-TTS buffer generation failed, falling back to OpenAI TTS:', falErr.message);
       }
     }
 
-    // 2. Secondary Engine: ElevenLabs (if configured)
-    if (provider === 'cloned' && env.ELEVENLABS_API_KEY && voiceId && !['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].includes(voiceId)) {
-      try {
-        const elevenLabsBuffer = await this.synthesizeWithElevenLabs({
-          text: cleanText,
-          voiceId,
-          voiceSettings,
-        });
-        if (elevenLabsBuffer) return elevenLabsBuffer;
-      } catch (err) {
-        console.warn('[TTS] ElevenLabs synthesis failed, falling back to OpenAI TTS:', err.message);
-      }
-    }
-
-    // 3. Fallback Engine: OpenAI TTS API (tts-1)
+    // 2. Preset Voice Engine: Fast OpenAI TTS API (tts-1) (Takes ~1 second)
     const targetVoice = (voiceSettings && voiceSettings.mappedPreset) ? voiceSettings.mappedPreset : voiceId;
     const resolvedVoice = this.resolveVoiceId(targetVoice);
     const speed = Math.min(4.0, Math.max(0.25, parseFloat(voiceSettings?.speed) || 1.0));

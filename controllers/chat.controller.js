@@ -294,8 +294,11 @@ export class ChatController {
         }
       }
 
+      const isClonedVoice = character?.voice_provider === 'cloned' && Boolean(refAudioUrl);
+      const voiceId = character?.voice_id || 'alloy';
+
       let speechResult;
-      if (falVoiceService.isConfigured()) {
+      if (isClonedVoice && falVoiceService.isConfigured()) {
         try {
           speechResult = await falVoiceService.generateSpeech({
             text: textToSpeak,
@@ -305,19 +308,24 @@ export class ChatController {
             removeSilence: true,
           });
         } catch (falErr) {
-          console.warn('[CHAT SPEAK] Fal.ai F5-TTS synthesis failed, falling back:', falErr.message);
+          console.warn('[CHAT SPEAK] Fal.ai F5-TTS synthesis failed, falling back to OpenAI TTS:', falErr.message);
           speechResult = await ttsService.generateSpeechUrl({
             text: textToSpeak,
             refAudioUrl,
             voiceSettings: character?.voice_settings,
+            voiceId,
+            provider: 'preset',
             refText,
           });
         }
       } else {
+        // Fast OpenAI TTS-1 preset synthesis (~1 second)
         speechResult = await ttsService.generateSpeechUrl({
           text: textToSpeak,
           refAudioUrl,
           voiceSettings: character?.voice_settings,
+          voiceId,
+          provider: 'preset',
           refText,
         });
       }

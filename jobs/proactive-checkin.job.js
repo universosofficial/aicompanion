@@ -64,7 +64,7 @@ export async function runProactiveCheckinEvaluation({ skipQuietHoursCheck = fals
       AND (ch.allow_proactive_checkins = TRUE OR ch.allow_proactive_checkins IS NULL)
   `);
 
-  // Mode B: Conversations with last activity between 18 and 72 hours ago
+  // Mode B: Conversations with last activity based on configurable intervals
   const [inactiveConversations] = await pool.query(`
     SELECT 
       c.id AS conversation_id,
@@ -73,13 +73,16 @@ export async function runProactiveCheckinEvaluation({ skipQuietHoursCheck = fals
       ch.name AS character_name,
       ch.avatar_url,
       ch.allow_proactive_checkins,
+      ch.proactive_frequency,
+      ch.proactive_preferred_time,
+      ch.proactive_channels,
       MAX(m.created_at) AS last_message_at
     FROM conversations c
     JOIN characters ch ON c.character_id = ch.id
     JOIN messages m ON m.conversation_id = c.id
     WHERE (ch.allow_proactive_checkins = TRUE OR ch.allow_proactive_checkins IS NULL)
-    GROUP BY c.id, c.user_id, c.character_id, ch.name, ch.avatar_url, ch.allow_proactive_checkins
-    HAVING last_message_at BETWEEN DATE_SUB(NOW(), INTERVAL 72 HOUR) AND DATE_SUB(NOW(), INTERVAL 18 HOUR)
+    GROUP BY c.id, c.user_id, c.character_id, ch.name, ch.avatar_url, ch.allow_proactive_checkins, ch.proactive_frequency, ch.proactive_preferred_time, ch.proactive_channels
+    HAVING last_message_at <= DATE_SUB(NOW(), INTERVAL 6 HOUR)
   `);
 
   console.log(`[PROACTIVE EVALUATION] Found ${pendingThreads.length} open thread(s) and ${inactiveConversations.length} inactive conversation(s).`);
@@ -93,23 +96,49 @@ export async function runProactiveCheckinEvaluation({ skipQuietHoursCheck = fals
     if (processedPairs.has(pairKey)) return null;
     processedPairs.add(pairKey);
 
-    // Rate Limit Check: Max 1 proactive dispatch per user/character per 24 hours
-    const [recentDispatches] = await pool.query(`
-      SELECT id FROM proactive_dispatch_log
-      WHERE user_id = ? AND character_id = ?
-        AND dispatched_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-      LIMIT 1
-    `, [userId, characterId]);
-
-    if (recentDispatches && recentDispatches.length > 0) {
-      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (24h rate limit active).`);
-      return { skipped: true, reason: 'RATE_LIMIT_24H', userId, characterId };
-    }
-
     // Fetch character details
     const character = await characterRepository.findById(characterId);
     if (!character || character.allow_proactive_checkins === false) {
       return null;
+    }
+
+    // Cooldown interval per character setting
+    const freqHoursMap = {
+      '6h': 6,
+      '12h': 12,
+      '24h': 24,
+      '48h': 48,
+      'weekly': 168,
+    };
+    const intervalHours = freqHoursMap[character.proactive_frequency] || 24;
+
+    // Rate Limit Check based on character's frequency
+    const [recentDispatches] = await pool.query(`
+      SELECT id FROM proactive_dispatch_log
+      WHERE user_id = ? AND character_id = ?
+        AND dispatched_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+      LIMIT 1
+    `, [userId, characterId, intervalHours]);
+
+    if (recentDispatches && recentDispatches.length > 0) {
+      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (${intervalHours}h rate limit active).`);
+      return { skipped: true, reason: `RATE_LIMIT_${intervalHours}H`, userId, characterId };
+    }
+
+    // Preferred time window check
+    const currentHour = now.getHours();
+    const prefTime = character.proactive_preferred_time || 'anytime';
+    if (prefTime === 'morning' && (currentHour < 8 || currentHour >= 12)) {
+      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Preferred time: morning, current: ${currentHour}:00).`);
+      return { skipped: true, reason: 'OUTSIDE_PREFERRED_MORNING', userId, characterId };
+    }
+    if (prefTime === 'afternoon' && (currentHour < 12 || currentHour >= 18)) {
+      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Preferred time: afternoon, current: ${currentHour}:00).`);
+      return { skipped: true, reason: 'OUTSIDE_PREFERRED_AFTERNOON', userId, characterId };
+    }
+    if (prefTime === 'evening' && (currentHour < 18 || currentHour >= 22)) {
+      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Preferred time: evening, current: ${currentHour}:00).`);
+      return { skipped: true, reason: 'OUTSIDE_PREFERRED_EVENING', userId, characterId };
     }
 
     // Fetch or create conversation
@@ -153,31 +182,46 @@ export async function runProactiveCheckinEvaluation({ skipQuietHoursCheck = fals
       tokenCount: Math.ceil(proactiveText.length / 4),
     });
 
-    // Dispatch Web Push notification
-    const pushResult = await pushService.sendPushNotification(userId, {
-      title: character.name,
-      body: proactiveText,
-      icon: character.avatar_url || 'https://api.dicebear.com/9.x/bottts/svg?seed=' + encodeURIComponent(character.name),
-      dataUrl: `/chat/${character.id}`,
-      characterId: character.id,
-    });
-
-    // Dispatch Email Notification via Resend
-    userRepository.findById(userId).then((user) => {
-      if (user && user.email) {
-        return resendService.sendNotificationEmail({
-          to: user.email,
-          title: `Message from ${character.name}`,
-          message: proactiveText,
-          companionName: character.name,
-          companionAvatar: character.avatar_url || '',
-          actionUrl: `${process.env.APP_URL || 'http://localhost:4200'}/chat/${character.id}`,
-          actionText: `Reply to ${character.name}`,
-        });
+    // Resolve channels
+    let channels = { push: true, email: true };
+    if (character.proactive_channels) {
+      if (typeof character.proactive_channels === 'string') {
+        try { channels = JSON.parse(character.proactive_channels); } catch {}
+      } else if (typeof character.proactive_channels === 'object') {
+        channels = character.proactive_channels;
       }
-    }).catch((emailErr) => {
-      console.warn(`[PROACTIVE EVALUATION] Failed to dispatch Resend email to User ${userId}:`, emailErr.message);
-    });
+    }
+
+    // Dispatch Web Push notification only if channel enabled
+    let pushResult = { sent: 0, skipped: true };
+    if (channels.push !== false) {
+      pushResult = await pushService.sendPushNotification(userId, {
+        title: character.name,
+        body: proactiveText,
+        icon: character.avatar_url || 'https://api.dicebear.com/9.x/bottts/svg?seed=' + encodeURIComponent(character.name),
+        dataUrl: `/chat/${character.id}`,
+        characterId: character.id,
+      });
+    }
+
+    // Dispatch Email Notification via Resend only if channel enabled
+    if (channels.email !== false) {
+      userRepository.findById(userId).then((user) => {
+        if (user && user.email) {
+          return resendService.sendNotificationEmail({
+            to: user.email,
+            title: `Message from ${character.name}`,
+            message: proactiveText,
+            companionName: character.name,
+            companionAvatar: character.avatar_url || '',
+            actionUrl: `${process.env.APP_URL || 'http://localhost:4200'}/chat/${character.id}`,
+            actionText: `Reply to ${character.name}`,
+          });
+        }
+      }).catch((emailErr) => {
+        console.warn(`[PROACTIVE EVALUATION] Failed to dispatch Resend email to User ${userId}:`, emailErr.message);
+      });
+    }
 
     const reason = openThread ? 'open_thread_followup' : 'inactivity_checkin';
 

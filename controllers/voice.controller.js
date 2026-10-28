@@ -11,6 +11,7 @@ import promptService, { buildMindConsultationPrompt } from '../services/ai/promp
 import openAiService from '../services/ai/openai.service.js';
 import memoryService from '../services/ai/memory.service.js';
 import summaryService from '../services/ai/summary.service.js';
+import moderationService from '../services/ai/moderation.service.js';
 import baseRepository from '../repositories/base.repository.js';
 import cloudinaryService from '../services/cloudinary.service.js';
 import env from '../config/env.js';
@@ -72,6 +73,19 @@ export class VoiceController {
    */
   async cloneVoice(req, res, next) {
     try {
+      const consentValid = moderationService.validateVoiceConsent(
+        req.body?.consent ?? req.body?.voice_consent
+      );
+      if (!consentValid.valid) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'VOICE_CONSENT_REQUIRED',
+            message: consentValid.error,
+          },
+        });
+      }
+
       if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
         return res.status(400).json({
           success: false,
@@ -331,6 +345,21 @@ export class VoiceController {
         });
       }
 
+      // Safety & Content Moderation Scan on user speech transcript
+      const moderation = await moderationService.checkContent(transcript, {
+        isPublic: Boolean(mindHandle || mindId),
+      });
+      if (moderation.isHardViolation) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'POLICY_VIOLATION',
+            message: moderation.reason || 'This audio transcript violates Univasos safety policies.',
+          },
+        });
+      }
+      const isCrisis = Boolean(moderation.isCrisis);
+
       // =========================================================================
       // CASE A: PRIVATE COMPANION OR SYSTEM CHARACTER
       // =========================================================================
@@ -420,12 +449,14 @@ export class VoiceController {
 
         const [memories, summary, recentHistory, retrievedChunks = []] = await Promise.all(retrievalPromises);
 
-        // System prompt with Socratic mentor pacing
+        // System prompt with Socratic mentor pacing & dedicated 45s-1min voice note directive
         const systemPrompt = promptService.buildSystemPrompt({
           character,
           memories,
           summary,
           retrievedChunks,
+          isVoiceNote: true,
+          isCrisis,
         });
 
         const historyWithoutCurrent = recentHistory.filter((m) => m.id !== savedUserMessage.id);
@@ -438,10 +469,10 @@ export class VoiceController {
           { role: 'user', content: transcript },
         ];
 
-        // AI Chat Turn Generation
+        // AI Voice Turn Generation (target: 45s to 1 min audio, approx 110-150 words)
         const aiResponse = await openAiService.generateChatCompletion({
           messages: messagesPayload,
-          max_tokens: 250, // Keep responses tight for spoken audio
+          max_tokens: 500,
         });
 
         const replyText = (aiResponse.content || '').trim();
@@ -467,7 +498,7 @@ export class VoiceController {
 
         // Save assistant voice note audio file
         const assistantAudioUrl = await saveVoiceNoteFile(assistantAudioBuffer, 'assistant_voice', 'mp3');
-        const assistantDuration = Math.max(1, Math.round(replyText.length / 14));
+        const assistantDuration = Math.max(45, Math.round(replyText.length / 14));
 
         // Persist AI voice note reply into database
         const savedAssistantMessage = await messageRepository.create({
@@ -519,6 +550,8 @@ export class VoiceController {
           data: {
             userTranscript: transcript,
             replyText,
+            crisisDetected: isCrisis,
+            crisisHotline: isCrisis ? moderation.crisisHotline : null,
             audioBase64: assistantAudioBuffer.toString('base64'),
             audioUrl: assistantAudioUrl,
             userAudioUrl,
@@ -597,8 +630,11 @@ export class VoiceController {
           userDuration
         );
 
-        // Assemble Socratic consultation system prompt
-        const systemPrompt = buildMindConsultationPrompt(mind, retrievedChunks, visitorMemories);
+        // Assemble Socratic consultation system prompt with 45s-1min voice memo directive
+        let systemPrompt = buildMindConsultationPrompt(mind, retrievedChunks, visitorMemories, new Date(), true);
+        if (isCrisis) {
+          systemPrompt += '\n\n[CRITICAL SAFETY & CRISIS PROTOCOL: COMPASSIONATE DE-ESCALATION & HOPE]\nRespond with immediate human warmth, empathy, and presence. Never validate self-harm. Reassure the user of their worth and encourage calling or texting the 988 Lifeline (or findahelpline.com).';
+        }
 
         const openAiMessages = [
           { role: 'system', content: systemPrompt },
@@ -611,7 +647,7 @@ export class VoiceController {
 
         const aiResponse = await openAiService.generateChatCompletion({
           messages: openAiMessages,
-          max_tokens: 220,
+          max_tokens: 500,
         });
 
         const replyText = (aiResponse.content || '').trim();
@@ -637,7 +673,7 @@ export class VoiceController {
 
         // Save assistant voice note audio file
         const assistantAudioUrl = await saveVoiceNoteFile(mindAudioBuffer, 'mind_voice', 'mp3');
-        const assistantDuration = Math.max(1, Math.round(replyText.length / 14));
+        const assistantDuration = Math.max(45, Math.round(replyText.length / 14));
 
         // Persist AI consultation message
         const savedAssistantTurn = await mindKnowledgeRepository.createConsultationMessage(
@@ -670,6 +706,8 @@ export class VoiceController {
           data: {
             userTranscript: transcript,
             replyText,
+            crisisDetected: isCrisis,
+            crisisHotline: isCrisis ? moderation.crisisHotline : null,
             audioBase64: mindAudioBuffer.toString('base64'),
             audioUrl: assistantAudioUrl,
             userAudioUrl,

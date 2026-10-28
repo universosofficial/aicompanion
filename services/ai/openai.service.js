@@ -33,7 +33,7 @@ export class OpenAiService {
     messages,
     model = env.OPENAI_MODEL || 'gpt-4o-mini',
     temperature = 0.65,
-    max_tokens = 650,
+    max_tokens = 2000,
   }) {
     if (!env.OPENAI_API_KEY || env.OPENAI_API_KEY === 'dummy-key-offline') {
       return this.generateOfflineSimulation(messages);
@@ -82,7 +82,7 @@ export class OpenAiService {
     messages,
     model = env.OPENAI_MODEL || 'gpt-4o-mini',
     temperature = 0.65,
-    max_tokens = 650,
+    max_tokens = 2000,
     signal,
   }) {
     // If no valid OpenAI key, return an offline async generator yielding simulated words

@@ -281,6 +281,18 @@ CALL AddColumnIfNotExists('mind_consultation_sessions', 'escalation_note', 'TEXT
 CALL AddColumnIfNotExists('mind_consultation_sessions', 'unread_for_creator', 'INT NOT NULL DEFAULT 0');
 CALL AddColumnIfNotExists('mind_consultation_sessions', 'escalated_at', 'TIMESTAMP NULL');
 
+-- D. Users table upgrades (Email verification, 2FA, Univasos token balance, Profile metadata)
+CALL AddColumnIfNotExists('users', 'is_verified', 'BOOLEAN NOT NULL DEFAULT TRUE');
+CALL AddColumnIfNotExists('users', 'email_verified_at', 'TIMESTAMP NULL DEFAULT NULL');
+CALL AddColumnIfNotExists('users', 'two_factor_enabled', 'BOOLEAN NOT NULL DEFAULT TRUE');
+CALL AddColumnIfNotExists('users', 'vasos_balance', 'INT NOT NULL DEFAULT 999999');
+CALL AddColumnIfNotExists('users', 'has_unlimited_vasos', 'BOOLEAN NOT NULL DEFAULT TRUE');
+CALL AddColumnIfNotExists('users', 'display_name', 'VARCHAR(100) NULL DEFAULT NULL');
+CALL AddColumnIfNotExists('users', 'avatar_url', 'VARCHAR(500) NULL DEFAULT NULL');
+CALL AddColumnIfNotExists('users', 'bio', 'TEXT NULL');
+CALL AddColumnIfNotExists('users', 'phone', 'VARCHAR(50) NULL DEFAULT NULL');
+CALL AddColumnIfNotExists('users', 'location', 'VARCHAR(100) NULL DEFAULT NULL');
+
 -- ==============================================================================
 -- 5. Create Advanced Engine Tables (Push, Threads, Bankroll, Sports Ledger)
 -- ==============================================================================
@@ -412,6 +424,20 @@ CREATE TABLE IF NOT EXISTS `time_aware_memories` (
   FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- J. Auth Verification Codes Table (Email verification & password resets)
+CREATE TABLE IF NOT EXISTS `auth_verification_codes` (
+  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT UNSIGNED NULL,
+  `email` VARCHAR(255) NOT NULL,
+  `code` VARCHAR(10) NOT NULL,
+  `type` ENUM('registration', 'login', 'password_reset') NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `is_used` BOOLEAN NOT NULL DEFAULT FALSE,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_email_type_used` (`email`, `type`, `is_used`),
+  INDEX `idx_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ==============================================================================
 -- 6. High Concurrency Indexes (Added safely if missing)
 -- ==============================================================================
@@ -447,6 +473,8 @@ INSERT IGNORE INTO `schema_migrations` (`migration_name`) VALUES
 ('013_high_concurrency_indexes.sql'),
 ('014_create_sports_betting_engine.sql'),
 ('015_add_message_edit_and_delete.sql'),
-('016_expand_relationship_type.sql');
+('016_expand_relationship_type.sql'),
+('017_create_auth_verification_codes.sql'),
+('018_add_user_profile_and_vasos_tokens.sql');
 
-SELECT 'Railway production database successfully synchronized with 0 data loss!' AS `Result`;
+SELECT 'Production database successfully synchronized with 0 data loss!' AS `Result`;

@@ -162,10 +162,23 @@ export class CharacterService {
     }
 
     if (existing.is_system) {
-      const err = new Error('System characters cannot be modified.');
-      err.statusCode = 403;
-      err.code = 'FORBIDDEN';
-      throw err;
+      const notificationKeys = [
+        'allow_proactive_checkins',
+        'allowProactiveCheckins',
+        'proactive_frequency',
+        'proactiveFrequency',
+        'proactive_preferred_time',
+        'proactivePreferredTime',
+        'proactive_channels',
+        'proactiveChannels'
+      ];
+      const isOnlyNotificationUpdate = Object.keys(updates).every((k) => notificationKeys.includes(k));
+      if (!isOnlyNotificationUpdate) {
+        const err = new Error('System characters persona and backstory cannot be modified.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN';
+        throw err;
+      }
     }
 
     const parseArrayInput = (val) => {
@@ -210,6 +223,18 @@ export class CharacterService {
     }
     if (sanitizedUpdates.riskTier !== undefined) {
       sanitizedUpdates.risk_tier = sanitizedUpdates.riskTier;
+    }
+    if (sanitizedUpdates.allowProactiveCheckins !== undefined) {
+      sanitizedUpdates.allow_proactive_checkins = sanitizedUpdates.allowProactiveCheckins;
+    }
+    if (sanitizedUpdates.proactiveFrequency !== undefined) {
+      sanitizedUpdates.proactive_frequency = sanitizedUpdates.proactiveFrequency;
+    }
+    if (sanitizedUpdates.proactivePreferredTime !== undefined) {
+      sanitizedUpdates.proactive_preferred_time = sanitizedUpdates.proactivePreferredTime;
+    }
+    if (sanitizedUpdates.proactiveChannels !== undefined) {
+      sanitizedUpdates.proactive_channels = sanitizedUpdates.proactiveChannels;
     }
 
     const updated = await characterRepository.update(id, userId, sanitizedUpdates);

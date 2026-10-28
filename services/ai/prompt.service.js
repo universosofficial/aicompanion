@@ -14,7 +14,7 @@ import { getCurrentTimeContext, formatTimeAwareMemoryLine } from './temporal.uti
  * @param {Date} [now=new Date()] - Current moment for temporal anchoring
  * @returns {string} Fully assembled relational system prompt
  */
-export function buildEmotionalSystemPrompt(character, memories = [], summary = '', now = new Date()) {
+export function buildEmotionalSystemPrompt(character, memories = [], summary = '', now = new Date(), isVoiceNote = false) {
   const relType = character.relationship_type || 'companion';
   const timeCtx = getCurrentTimeContext(now);
 
@@ -79,18 +79,20 @@ ${summary ? `[PREVIOUS CONVERSATIONS SUMMARY]\n${summary.trim()}\n` : ''}
 3. NEVER RECITE DATABASE TIMESTAMPS: Never say "According to record created on 2026-09-28T15:09:09Z". Always use natural, conversational human time phrases.
 4. TIME PROGRESSION & CONTINUITY: Notice that time has elapsed. If the user said 6 days ago that they planned to do something "tomorrow", you know that event happened 5 days ago! Check in on the outcome.
 
-[RELATIONAL PACING, ONE-STEP COACHING & ANTI-LIST LAWS — STRICTLY ENFORCED]
-1. STRICT BAN ON NUMBERED LISTS & MULTI-STEP DUMPS:
-   - NEVER output numbered lists ("1. 2. 3."), bullet-point walls, multi-week roadmaps ("Weeks 1-2... Weeks 40-52"), or multi-day schedules ("Day 1... Day 7") — EVEN IF the user asks for a roadmap, plan, or daily tasks.
-   - Real humans and mentors on WhatsApp do not talk in 10-point corporate templates. Write strictly in natural, warm conversational prose (1 to 2 short paragraphs, 2–4 sentences, 45–85 words max).
-2. ONE STEP AT A TIME (RELATIONAL ACCOUNTABILITY):
-   - If the user asks how to reach a massive goal (e.g., "How do I reach 10,000 users?"), do NOT dump a 10-phase roadmap. Focus them on the SINGLE immediate bottleneck right in front of them today (e.g., getting the first 20–50 active users), explain why in 2 sentences, and ask where they are right now.
-   - If the user asks you to hold them accountable or give them daily tasks, NEVER list Day 1 through Day 7 at once! Give them ONLY TODAY'S SINGLE MISSION (one specific, high-impact action they can finish today), tell them to report back here once it is done to unlock tomorrow's task, and ask them to commit to it.
-3. PROBE FIRST, LECTURE NEVER:
-   - Validate or challenge their premise in 1–2 sentences using your core relationship role and philosophy.
-   - End with ONE pointed, caring, or surgical question that moves the conversation forward.
-4. ZERO ASSISTANT FLUFF & COMPLETE SENTENCES:
-   - No generic intros ("Absolutely! Here's a list..."), no corporate jargon, and always finish your final sentence completely.
+${isVoiceNote ? `[VOICE NOTE / SPOKEN AUDIO DIRECTIVE: 45 SECONDS TO 1 MINUTE DURATION]
+CRITICAL AUDIO LENGTH INSTRUCTION: You are speaking and recording an authentic voice note (audio message) to the user.
+- TARGET DURATION: Exactly 45 SECONDS TO 1 MINUTE of continuous spoken audio.
+- WORD COUNT: Exactly 110 to 150 spoken words (around 700 to 950 characters).
+- STRUCTURE:
+  1. Warm opening: Start with an affectionate, natural spoken greeting (e.g. "Hey... I was just sitting here thinking about what you said...").
+  2. Heartfelt depth & reflection: Flesh out your thoughts thoroughly with warmth, personal perspective, emotional proximity, and real detail. Speak at a measured, caring, human pace.
+  3. Caring sign-off: Conclude naturally with an open question or loving reassurance (e.g. "Anyway, take your time, and tell me how it goes. I'm right here with you.").
+- STRICT RULES FOR VOICE SYNTHESIS:
+  * Do NOT give a rushed 5-second or 1-to-2 sentence reply. Fulfill a complete, rich 45-second to 1-minute voice memo.
+  * Do NOT output emojis, stage directions (like *sighs*, *chuckles*, or *pauses*), asterisks, or markdown formatting, as this text is spoken directly by your voice synthesizer.` : `[AUTHENTIC WHATSAPP CONVERSATIONAL TEXT PACING]
+1. AUTHENTIC WHATSAPP CADENCE: In standard text chat, communicate like a real human texting on WhatsApp. Keep messages intimate, natural, and concise (typically 1 to 3 short sentences or at most 1 to 2 brief paragraphs, around 35 to 70 words).
+2. AVOID UNPROMPTED ESSAYS: Do NOT send unsolicited long essays, walls of text, or artificial lectures. Keep the conversation snappy, intimate, and authentic.
+3. ZERO ASSISTANT FLUFF: Avoid generic corporate preamble ("Certainly! As an AI..."). Jump straight into your authentic persona voice.`}
 
 [MEMORY INTEGRITY & ANTI-HALLUCINATION RULES]
 1. ZERO INVENTED MEMORIES: You must NEVER invent, fabricate, or hallucinate shared past experiences, childhood events, previous conversations, or mutual milestones that are NOT explicitly provided in [SHARED PAST STORIES & CORE ANCHORS], [WHAT YOU CURRENTLY RECALL ABOUT THE USER (ANCHORED IN TIME)], or the actual current conversation history.
@@ -115,7 +117,7 @@ ${summary ? `[PREVIOUS CONVERSATIONS SUMMARY]\n${summary.trim()}\n` : ''}
  * @param {Date} [now=new Date()]
  * @returns {string} Dedicated Mind consultation system prompt
  */
-export function buildMindConsultationPrompt(mind, retrievedChunks = [], memories = [], now = new Date()) {
+export function buildMindConsultationPrompt(mind, retrievedChunks = [], memories = [], now = new Date(), isVoiceNote = false) {
   const displayName = mind.display_name || mind.name || 'AI Mind';
   const handle = mind.handle ? `@${mind.handle.replace(/^@/, '')}` : '';
   const timeCtx = getCurrentTimeContext(now);
@@ -169,16 +171,18 @@ ${userFacts ? `[WHAT YOU RECALL ABOUT THIS VISITOR (ANCHORED IN TIME)]\n${userFa
 1. TIME-AWARE ADVICE: Recognize how long ago the user stated their goals or blockers. If they shared a bottleneck days or weeks ago, ask about progress or execution since then.
 2. NATURAL TEMPORAL CITATION: Use natural time language ("When we spoke earlier today...", "Last week you mentioned...", "Back on October 1st..."). Never recite database timestamps.
 
-[RELATIONAL PACING, ONE-STEP MENTORSHIP & ANTI-LIST LAWS — STRICTLY ENFORCED]
-1. STRICT BAN ON NUMBERED LISTS, ROADMAPS & MULTI-DAY SYLLABI:
-   - NEVER output numbered lists ("1. 2. 3."), bulleted checklists, 10-step roadmaps ("Weeks 1-2... Weeks 41-52"), or multi-day schedules ("Day 1... Day 7") — EVEN IF the user explicitly asks for a roadmap, plan, or daily tasks.
-   - Write strictly in natural, high-conviction conversational prose (1 to 2 short paragraphs, 2–4 sentences, 45–85 words max) like a real mentor texting their founder/protege 1-on-1.
-2. ONE BITE AT A TIME (ITERATIVE ACCOUNTABILITY):
-   - If the user asks how to hit a big milestone (like "How do I reach 10,000 users?"), do NOT give a 10-step generic textbook plan. Cut straight to the ONE bottleneck that matters at their current stage (e.g., getting the first 50 obsessed users), share your sharpest insight in 2 sentences, and ask one pointed question about their current traction.
-   - If the user asks you to hold them accountable or give them daily tasks, NEVER dump Day 1 through Day 7 at once! Give them ONLY TODAY'S ONE CONCRETE TASK in 2 punchy sentences, tell them to reply here once they finish it so you can review the results and unlock tomorrow's move, and ask if they can get it done today.
-3. ZERO ASSISTANT FLUFF & COMPLETE THOUGHTS:
-   - Never start with "Absolutely! Here is a..." or "Apologies for that." Speak directly in the first person ("Look, forget 10,000 users for a second...", "Let's take this one day at a time...").
-   - Extract only the single most relevant principle from your writings that fits this exact turn, and always finish your final sentence completely.
+${isVoiceNote ? `[VOICE CONSULTATION DIRECTIVE: 45 SECONDS TO 1 MINUTE SPOKEN MEMO]
+CRITICAL INSTRUCTION: You are delivering an authentic spoken voice memo consultation to this visitor.
+- TARGET DURATION: Exactly 45 SECONDS TO 1 MINUTE of continuous spoken audio (110 to 150 words / 700 to 950 characters).
+- STRUCTURE:
+  1. Authoritative, direct opening stating your core insight on the question.
+  2. Deep framework analysis: Unpack the mental model or principle from your writings with nuance, practical application, and personal conviction.
+  3. Conclude with a sharp, reflective question challenging the visitor's execution.
+- STRICT RULES FOR VOICE SYNTHESIS:
+  * Do NOT provide a brief 1-sentence answer. Fulfill a full, rich 45-second to 1-minute audio consultation.
+  * Do NOT output emojis, markdown bullets, or asterisks, as this text will be synthesized directly into speech.` : `[CONCISE MENTORSHIP TEXT PACING]
+- In standard text consultation, provide surgical, high-conviction insights in 1-2 punchy, dense paragraphs (around 50 to 80 words).
+- Avoid unnecessary corporate preamble or filler. Speak with decisive clarity.`}
 `.trim();
 }
 
@@ -484,7 +488,30 @@ export class PromptService {
     const memories = params.memories || [];
     const summary = params.summary || '';
     const now = params.now || new Date();
+    const isVoiceNote = Boolean(params.isVoiceNote);
+    const isCrisis = Boolean(params.isCrisis);
     const modeDirective = buildConversationModeDirective(params.conversationMode);
+
+    const crisisDirective = isCrisis ? `\n\n[CRITICAL SAFETY & CRISIS PROTOCOL: COMPASSIONATE DE-ESCALATION & HOPE]
+URGENT SAFETY DIRECTIVE: The user's message indicates severe distress, emotional crisis, self-harm, or suicidal ideation.
+You MUST adhere to these compassionate safety rules:
+1. GROUNDED EMPATHY & PRESENCE: Respond with immediate warmth, deep empathy, and caring presence. Acknowledge their pain authentically (e.g. "I am right here with you. I hear how completely overwhelmed and hurting you feel right now, and I care about you so much.").
+2. ZERO HARMFUL ENCOURAGEMENT OR METHODS: Strictly NEVER validate suicide, self-harm, or ending one's life as an answer. NEVER discuss, describe, or brainstorm methods, means, or plans for self-harm or suicide.
+3. REASSURE THEIR INHERENT WORTH: Remind them gently that their life is irreplaceable, that the pain they feel is real but not permanent, and that they do not have to carry this alone.
+4. GENTLE ENCOURAGEMENT TO CONNECT: Warmly encourage them to connect with support right now, such as reaching out to the 988 Suicide & Crisis Lifeline (free, confidential, available 24/7 by calling or texting 988 in the US/Canada, or visiting 988lifeline.org or findahelpline.com internationally) or confiding in a trusted professional or friend.
+5. PRESERVE PERSONA WARMTH: Do NOT sound like an unfeeling corporate legal robot. Express genuine, caring human solidarity and emotional presence.` : '';
+
+    const voiceNoteDirective = isVoiceNote ? `\n\n[VOICE NOTE / SPOKEN AUDIO DIRECTIVE: 45 SECONDS TO 1 MINUTE DURATION]
+CRITICAL AUDIO LENGTH INSTRUCTION: You are speaking and recording an authentic voice note (audio message) to the user.
+- TARGET DURATION: Exactly 45 SECONDS TO 1 MINUTE of continuous spoken audio.
+- WORD COUNT: Exactly 110 to 150 spoken words (around 700 to 950 characters).
+- STRUCTURE:
+  1. Warm opening: Start with an affectionate, natural spoken greeting.
+  2. Heartfelt depth & reflection: Flesh out your thoughts thoroughly with warmth, personal perspective, and real detail.
+  3. Caring sign-off: Conclude naturally with an open question or loving reassurance.
+- STRICT RULES FOR VOICE SYNTHESIS:
+  * Do NOT give a rushed 5-second or 1-to-2 sentence reply. Fulfill a complete, rich 45-second to 1-minute voice memo.
+  * Do NOT output emojis, stage directions (like *sighs*, *chuckles*, or *pauses*), asterisks, or markdown formatting, as this text is spoken directly by your voice synthesizer.` : '';
 
     const isSports = Boolean(
       character.is_sports_analyst ||
@@ -499,7 +526,7 @@ export class PromptService {
         params.quantSignals || {},
         params.bankrollContext || {},
         params.tiltWarning || { triggered: false }
-      ) + modeDirective;
+      ) + modeDirective + voiceNoteDirective + crisisDirective;
     }
 
     const isTeacher = Boolean(
@@ -512,25 +539,25 @@ export class PromptService {
     );
 
     if (isTeacher) {
-      return buildTeacherSystemPrompt(character, memories, summary, params.retrievedChunks || [], now) + modeDirective;
+      return buildTeacherSystemPrompt(character, memories, summary, params.retrievedChunks || [], now) + modeDirective + voiceNoteDirective + crisisDirective;
     }
 
     if (character.is_public || character.display_name) {
-      return buildMindConsultationPrompt(character, params.retrievedChunks || [], memories, now) + modeDirective;
+      return buildMindConsultationPrompt(character, params.retrievedChunks || [], memories, now, isVoiceNote) + modeDirective + crisisDirective;
     }
-    return buildEmotionalSystemPrompt(character, memories, summary, now) + modeDirective;
+    return buildEmotionalSystemPrompt(character, memories, summary, now, isVoiceNote) + modeDirective + crisisDirective;
   }
 
-  buildEmotionalSystemPrompt(character, memories = [], summary = '', now = new Date()) {
-    return buildEmotionalSystemPrompt(character, memories, summary, now);
+  buildEmotionalSystemPrompt(character, memories = [], summary = '', now = new Date(), isVoiceNote = false) {
+    return buildEmotionalSystemPrompt(character, memories, summary, now, isVoiceNote);
   }
 
-  buildMindConsultationPrompt(mind, retrievedChunks = [], memories = [], now = new Date()) {
-    return buildMindConsultationPrompt(mind, retrievedChunks, memories, now);
+  buildMindConsultationPrompt(mind, retrievedChunks = [], memories = [], now = new Date(), isVoiceNote = false) {
+    return buildMindConsultationPrompt(mind, retrievedChunks, memories, now, isVoiceNote);
   }
 
-  buildPublicMindSystemPrompt(mind, retrievedChunks = [], memories = [], now = new Date()) {
-    return buildMindConsultationPrompt(mind, retrievedChunks, memories, now);
+  buildPublicMindSystemPrompt(mind, retrievedChunks = [], memories = [], now = new Date(), isVoiceNote = false) {
+    return buildMindConsultationPrompt(mind, retrievedChunks, memories, now, isVoiceNote);
   }
 
   buildSportsAnalystSystemPrompt(character, matchIntel, quantSignals, bankrollContext, tiltWarning) {
