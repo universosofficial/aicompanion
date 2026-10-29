@@ -42,9 +42,6 @@ BEGIN
         PREPARE stmt FROM @sqlStmt;
         EXECUTE stmt;
         DEALLOCATE PREPARE stmt;
-        SELECT CONCAT('Added column ', targetColumn, ' to ', targetTable) AS `Migration Status`;
-    ELSE
-        SELECT CONCAT('Column ', targetColumn, ' already exists on ', targetTable, ' (Skipped)') AS `Migration Status`;
     END IF;
 END$$
 
@@ -66,9 +63,6 @@ BEGIN
         PREPARE stmt FROM @sqlStmt;
         EXECUTE stmt;
         DEALLOCATE PREPARE stmt;
-        SELECT CONCAT('Added index ', targetIndex, ' to ', targetTable) AS `Migration Status`;
-    ELSE
-        SELECT CONCAT('Index ', targetIndex, ' already exists on ', targetTable, ' (Skipped)') AS `Migration Status`;
     END IF;
 END$$
 DELIMITER ;
@@ -267,6 +261,9 @@ CALL AddColumnIfNotExists('characters', 'nicknames_for_user', 'JSON NULL');
 CALL AddColumnIfNotExists('characters', 'catchphrases', 'JSON NULL');
 CALL AddColumnIfNotExists('characters', 'speech_quirks', 'TEXT NULL');
 CALL AddColumnIfNotExists('characters', 'shared_memories_seed', 'TEXT NULL');
+CALL AddColumnIfNotExists('characters', 'proactive_frequency', 'VARCHAR(32) NOT NULL DEFAULT \'24h\'');
+CALL AddColumnIfNotExists('characters', 'proactive_preferred_time', 'VARCHAR(32) NOT NULL DEFAULT \'anytime\'');
+CALL AddColumnIfNotExists('characters', 'proactive_channels', 'JSON NULL');
 
 -- C. User Minds & Direct Paid Human Chat upgrades
 CALL AddColumnIfNotExists('user_minds', 'direct_chat_enabled', 'TINYINT(1) NOT NULL DEFAULT 1');
@@ -475,6 +472,7 @@ INSERT IGNORE INTO `schema_migrations` (`migration_name`) VALUES
 ('015_add_message_edit_and_delete.sql'),
 ('016_expand_relationship_type.sql'),
 ('017_create_auth_verification_codes.sql'),
-('018_add_user_profile_and_vasos_tokens.sql');
+('018_add_user_profile_and_vasos_tokens.sql'),
+('019_add_character_notification_settings.sql');
 
 SELECT 'Production database successfully synchronized with 0 data loss!' AS `Result`;

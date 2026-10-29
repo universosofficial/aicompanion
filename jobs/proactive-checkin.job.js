@@ -39,13 +39,7 @@ export async function runProactiveCheckinEvaluation({ skipQuietHoursCheck = fals
   const now = new Date();
   console.log(`[PROACTIVE EVALUATION] Running evaluation cycle at ${now.toISOString()}...`);
 
-  // 1. Guardrail: Quiet Hours Check
-  if (!skipQuietHoursCheck && isWithinQuietHours(now)) {
-    console.log(`[PROACTIVE EVALUATION] Current time (${now.toLocaleTimeString()}) is within quiet hours (22:00 - 08:30). Cycle skipped.`);
-    return { skipped: true, reason: 'QUIET_HOURS' };
-  }
-
-  // 2. Discover candidates:
+  // 1. Discover candidates:
   // Mode A: Pending Unresolved Open Threads that have reached their trigger time
   const [pendingThreads] = await pool.query(`
     SELECT 
@@ -82,7 +76,7 @@ export async function runProactiveCheckinEvaluation({ skipQuietHoursCheck = fals
     JOIN messages m ON m.conversation_id = c.id
     WHERE (ch.allow_proactive_checkins = TRUE OR ch.allow_proactive_checkins IS NULL)
     GROUP BY c.id, c.user_id, c.character_id, ch.name, ch.avatar_url, ch.allow_proactive_checkins, ch.proactive_frequency, ch.proactive_preferred_time, ch.proactive_channels
-    HAVING last_message_at <= DATE_SUB(NOW(), INTERVAL 6 HOUR)
+    HAVING last_message_at <= DATE_SUB(NOW(), INTERVAL 2 HOUR)
   `);
 
   console.log(`[PROACTIVE EVALUATION] Found ${pendingThreads.length} open thread(s) and ${inactiveConversations.length} inactive conversation(s).`);
@@ -102,43 +96,144 @@ export async function runProactiveCheckinEvaluation({ skipQuietHoursCheck = fals
       return null;
     }
 
-    // Cooldown interval per character setting
-    const freqHoursMap = {
-      '6h': 6,
-      '12h': 12,
-      '24h': 24,
-      '48h': 48,
-      'weekly': 168,
-    };
-    const intervalHours = freqHoursMap[character.proactive_frequency] || 24;
-
-    // Rate Limit Check based on character's frequency
-    const [recentDispatches] = await pool.query(`
-      SELECT id FROM proactive_dispatch_log
-      WHERE user_id = ? AND character_id = ?
-        AND dispatched_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
-      LIMIT 1
-    `, [userId, characterId, intervalHours]);
-
-    if (recentDispatches && recentDispatches.length > 0) {
-      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (${intervalHours}h rate limit active).`);
-      return { skipped: true, reason: `RATE_LIMIT_${intervalHours}H`, userId, characterId };
+    // 1. Resolve and parse flexible schedule settings
+    let channels = { push: true, email: true };
+    if (character.proactive_channels) {
+      if (typeof character.proactive_channels === 'string') {
+        try { channels = JSON.parse(character.proactive_channels); } catch {}
+      } else if (typeof character.proactive_channels === 'object') {
+        channels = character.proactive_channels;
+      }
     }
 
-    // Preferred time window check
-    const currentHour = now.getHours();
-    const prefTime = character.proactive_preferred_time || 'anytime';
-    if (prefTime === 'morning' && (currentHour < 8 || currentHour >= 12)) {
-      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Preferred time: morning, current: ${currentHour}:00).`);
-      return { skipped: true, reason: 'OUTSIDE_PREFERRED_MORNING', userId, characterId };
+    // 2. Resolve user timezone
+    const userTz = channels.timezone || null;
+    let userNow = now;
+    if (userTz) {
+      try {
+        const tzStr = now.toLocaleString('en-US', { timeZone: userTz });
+        userNow = new Date(tzStr);
+      } catch {
+        userNow = now;
+      }
     }
-    if (prefTime === 'afternoon' && (currentHour < 12 || currentHour >= 18)) {
-      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Preferred time: afternoon, current: ${currentHour}:00).`);
-      return { skipped: true, reason: 'OUTSIDE_PREFERRED_AFTERNOON', userId, characterId };
+
+    const userDayIdx = userNow.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+    const dayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const currentDayName = dayMap[userDayIdx];
+    const userHour = userNow.getHours();
+    const userMinute = userNow.getMinutes();
+
+    // 3. Day-of-Week Flexibility Check
+    const daysMode = channels.days_mode || 
+      (character.proactive_frequency === 'weekdays' ? 'weekdays' : 
+      (character.proactive_frequency === 'weekends' ? 'weekends' : 
+      (character.proactive_frequency === 'custom_days' ? 'custom' : 'everyday')));
+
+    if (daysMode === 'weekdays' && (userDayIdx === 0 || userDayIdx === 6)) {
+      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Scheduled for weekdays only, today is ${currentDayName}).`);
+      return { skipped: true, reason: 'DAY_NOT_WEEKDAY', userId, characterId };
     }
-    if (prefTime === 'evening' && (currentHour < 18 || currentHour >= 22)) {
-      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Preferred time: evening, current: ${currentHour}:00).`);
-      return { skipped: true, reason: 'OUTSIDE_PREFERRED_EVENING', userId, characterId };
+
+    if (daysMode === 'weekends' && userDayIdx >= 1 && userDayIdx <= 5) {
+      console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Scheduled for weekends only, today is ${currentDayName}).`);
+      return { skipped: true, reason: 'DAY_NOT_WEEKEND', userId, characterId };
+    }
+
+    if (daysMode === 'custom' && Array.isArray(channels.custom_days) && channels.custom_days.length > 0) {
+      const normalizedDays = channels.custom_days.map((d) => String(d).toLowerCase().slice(0, 3));
+      if (!normalizedDays.includes(currentDayName)) {
+        console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Configured for [${normalizedDays.join(', ')}], today is ${currentDayName}).`);
+        return { skipped: true, reason: 'DAY_NOT_SCHEDULED', userId, characterId };
+      }
+    }
+
+    // 4. Exact Particular Time vs. Time Window vs. Repetitive Interval Check
+    const rawPrefTime = (character.proactive_preferred_time || channels.window || 'anytime').toLowerCase().trim();
+    const exactTime = channels.exact_time || (/^\d{1,2}:\d{2}$/.test(rawPrefTime) ? rawPrefTime : null);
+    const timingType = channels.timing_type || 
+      (exactTime ? 'exact_time' : 
+      (['morning', 'afternoon', 'evening', 'night'].includes(rawPrefTime) ? 'window' : 'interval'));
+
+    if (timingType === 'exact_time' && exactTime) {
+      const parts = exactTime.split(':').map((s) => parseInt(s, 10));
+      const targetHour = parts[0];
+      const targetMin = parts[1] || 0;
+      const targetTotalMins = targetHour * 60 + targetMin;
+      const userTotalMins = userHour * 60 + userMinute;
+      const diffMins = userTotalMins - targetTotalMins;
+
+      // Check within matching window (-10 to +45 minutes of scheduled time)
+      if (diffMins < -10 || diffMins > 45) {
+        return { skipped: true, reason: `OUTSIDE_EXACT_TIME_${exactTime}`, userId, characterId };
+      }
+
+      // Check if already dispatched in the last 18 hours (once per day)
+      const [dispatchedToday] = await pool.query(`
+        SELECT id FROM proactive_dispatch_log
+        WHERE user_id = ? AND character_id = ?
+          AND dispatched_at >= DATE_SUB(NOW(), INTERVAL 18 HOUR)
+        LIMIT 1
+      `, [userId, characterId]);
+
+      if (dispatchedToday && dispatchedToday.length > 0) {
+        console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (Already dispatched daily message today).`);
+        return { skipped: true, reason: 'ALREADY_DISPATCHED_TODAY', userId, characterId };
+      }
+    } else if (timingType === 'window') {
+      if (rawPrefTime === 'morning' && (userHour < 8 || userHour >= 12)) {
+        return { skipped: true, reason: 'OUTSIDE_PREFERRED_MORNING', userId, characterId };
+      }
+      if (rawPrefTime === 'afternoon' && (userHour < 12 || userHour >= 18)) {
+        return { skipped: true, reason: 'OUTSIDE_PREFERRED_AFTERNOON', userId, characterId };
+      }
+      if (rawPrefTime === 'evening' && (userHour < 18 || userHour >= 22)) {
+        return { skipped: true, reason: 'OUTSIDE_PREFERRED_EVENING', userId, characterId };
+      }
+      if (rawPrefTime === 'night' && (userHour < 21 && userHour >= 4)) {
+        return { skipped: true, reason: 'OUTSIDE_PREFERRED_NIGHT', userId, characterId };
+      }
+
+      // Daily window cooldown (18 hours)
+      const [recentWindowDispatches] = await pool.query(`
+        SELECT id FROM proactive_dispatch_log
+        WHERE user_id = ? AND character_id = ?
+          AND dispatched_at >= DATE_SUB(NOW(), INTERVAL 18 HOUR)
+        LIMIT 1
+      `, [userId, characterId]);
+
+      if (recentWindowDispatches && recentWindowDispatches.length > 0) {
+        return { skipped: true, reason: 'ALREADY_DISPATCHED_IN_WINDOW', userId, characterId };
+      }
+    } else {
+      // Repetition interval mode (e.g. 2h, 4h, 6h, 12h, 24h, 48h, weekly)
+      const freqHoursMap = {
+        '2h': 2,
+        '4h': 4,
+        '6h': 6,
+        '12h': 12,
+        '24h': 24,
+        '48h': 48,
+        'weekly': 168,
+      };
+      const intervalHours = freqHoursMap[character.proactive_frequency] || 24;
+
+      // Check quiet hours in user's timezone for generic anytime intervals
+      if (!skipQuietHoursCheck && isWithinQuietHours(userNow)) {
+        return { skipped: true, reason: 'QUIET_HOURS', userId, characterId };
+      }
+
+      const [recentDispatches] = await pool.query(`
+        SELECT id FROM proactive_dispatch_log
+        WHERE user_id = ? AND character_id = ?
+          AND dispatched_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+        LIMIT 1
+      `, [userId, characterId, intervalHours]);
+
+      if (recentDispatches && recentDispatches.length > 0) {
+        console.log(`[PROACTIVE EVALUATION] Skipping User ${userId} / Character ${characterId} (${intervalHours}h rate limit active).`);
+        return { skipped: true, reason: `RATE_LIMIT_${intervalHours}H`, userId, characterId };
+      }
     }
 
     // Fetch or create conversation
@@ -181,16 +276,6 @@ export async function runProactiveCheckinEvaluation({ skipQuietHoursCheck = fals
       content: proactiveText,
       tokenCount: Math.ceil(proactiveText.length / 4),
     });
-
-    // Resolve channels
-    let channels = { push: true, email: true };
-    if (character.proactive_channels) {
-      if (typeof character.proactive_channels === 'string') {
-        try { channels = JSON.parse(character.proactive_channels); } catch {}
-      } else if (typeof character.proactive_channels === 'object') {
-        channels = character.proactive_channels;
-      }
-    }
 
     // Dispatch Web Push notification only if channel enabled
     let pushResult = { sent: 0, skipped: true };
@@ -288,7 +373,7 @@ let checkinIntervalTimer = null;
  * Default schedule: Every 30 minutes.
  * @param {number} [intervalMs=1800000]
  */
-export function startProactiveCheckinJob(intervalMs = 30 * 60 * 1000) {
+export function startProactiveCheckinJob(intervalMs = 15 * 60 * 1000) {
   if (checkinIntervalTimer) {
     clearInterval(checkinIntervalTimer);
   }
